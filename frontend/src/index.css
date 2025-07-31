@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+/* CSS Variables for theming */
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.15);
+  --glass-border: rgba(255, 255, 255, 0.2);
+  --shadow-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Base Styles */
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-gradient-to-br from-green-50 via-blue-50 to-orange-50 text-gray-900 antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400;
+  }
+}
+
+/* Utility Classes - No longer using @layer components for v4 */
+/* Input Styles */
+.input-primary {
+  @apply w-full px-4 py-4 rounded-2xl border border-gray-200 bg-white/90 backdrop-blur-sm text-gray-900 placeholder-gray-500 focus:border-green-400 focus:ring-4 focus:ring-green-100 transition-all duration-200;
+  min-height: 44px;
+}
+
+.input-group {
+  @apply space-y-2;
+}
+
+.input-label {
+  @apply block text-sm font-semibold text-gray-700 mb-2;
+}
+
+/* Navigation Styles */
+.nav-item {
+  @apply flex flex-col items-center space-y-2 py-3 px-4 rounded-2xl transition-all duration-200 hover:bg-green-50 active:bg-green-100;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.nav-item.active {
+  @apply bg-green-100 text-green-700;
+}
+
+/* Icon Styles */
+.icon-sm {
+  @apply w-5 h-5;
+}
+
+.icon-md {
+  @apply w-6 h-6;
+}
+
+.icon-lg {
+  @apply w-8 h-8;
+}
+
+.icon-xl {
+  @apply w-12 h-12;
+}
+
+/* Loading Styles */
+.loading-pulse {
+  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.loading-bounce {
+  animation: bounce-gentle 2s infinite;
+}
+
+/* Define keyframes directly in CSS */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes bounce-gentle {
+  0%, 100% {
+    transform: translateY(-5%);
+    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+/* Status Indicator Styles */
+.status-online {
+  @apply w-3 h-3 rounded-full;
+  background-color: #10b981;
+  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.status-offline {
+  @apply w-3 h-3 bg-gray-400 rounded-full;
+}
+
+/* Floating Action Button */
+.fab {
+  @apply fixed bottom-6 right-6 w-16 h-16 text-white rounded-full shadow-lg hover:shadow-xl transform hover:scale-110 transition-all duration-200 active:scale-95 flex items-center justify-center z-50;
+  background: linear-gradient(to right, #22c55e, #16a34a);
+}
+
+/* Badge Styles - Now defined in Tailwind config utilities */
+
+/* Gradient Text */
+.text-gradient-primary {
+  @apply bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent;
+}
+
+.text-gradient-sky {
+  @apply bg-gradient-to-r from-sky-500 to-sky-600 bg-clip-text text-transparent;
+}
+
+.text-gradient-orange {
+  @apply bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent;
+}
+
+/* Background Gradients */
+.bg-gradient-primary {
+  @apply bg-gradient-to-r from-green-500 to-green-600;
+}
+
+.bg-gradient-sky {
+  @apply bg-gradient-to-r from-sky-500 to-sky-600;
+}
+
+.bg-gradient-orange {
+  @apply bg-gradient-to-r from-orange-500 to-orange-600;
+}
+
+.bg-gradient-earth {
+  @apply bg-gradient-to-r from-amber-500 to-amber-600;
+}
+
+/* Animation delays */
+.delay-100 {
+  animation-delay: 100ms;
+}
+
+.delay-200 {
+  animation-delay: 200ms;
+}
+
+.delay-300 {
+  animation-delay: 300ms;
+}
+
+.delay-500 {
+  animation-delay: 500ms;
+}
+
+/* Touch-friendly utilities */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Safe area utilities for mobile devices */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Hide scrollbar but allow scrolling */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Focus styles for accessibility */
+.focus-ring {
+  @apply focus:outline-none focus:ring-4 focus:ring-green-100 focus:border-green-400;
+}
+
+/* PWA specific styles */
+@media (display-mode: standalone) {
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Hide scrollbars in PWA mode */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Dark mode support (future enhancement) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-bg: rgba(0, 0, 0, 0.15);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --shadow-color: rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-warning {
+    border: 2px solid currentColor;
+  }
+
+  .card {
+    border: 2px solid #000;
+  }
+}

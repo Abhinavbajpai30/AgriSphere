@@ -1,0 +1,58 @@
+{
+  "name": "agrisphere",
+  "version": "1.0.0",
+  "description": "AgriSphere - AI-powered digital agronomist for smallholder farmers",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm start",
+    "setup": "npm run setup:backend",
+    "setup:backend": "cd backend && npm run setup",
+    "install:all": "npm install && npm run install:backend && npm run install:frontend",
+    "install:backend": "cd backend && npm install",
+    "install:frontend": "cd frontend && npm install",
+    "test": "npm run test:backend",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npm run lint",
+    "build": "npm run build:frontend",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "keywords": [
+    "agriculture",
+    "ai",
+    "farmers",
+    "agritech",
+    "crop-management",
+    "irrigation",
+    "farming",
+    "smallholder-farmers"
+  ],
+  "author": "AgriSphere Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/agrisphere.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/agrisphere/issues"
+  },
+  "homepage": "https://github.com/your-org/agrisphere#readme"
+}

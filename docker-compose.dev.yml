@@ -1,0 +1,83 @@
+version: '3.8'
+
+# Development-specific overrides for docker-compose.yml
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  mongodb:
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./backend/scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: agrisphere
+
+  backend:
+    build:
+      target: development
+    environment:
+      NODE_ENV: development
+      DEBUG: agrisphere:*
+      MONGODB_URI: mongodb://admin:password123@mongodb:27017/agrisphere?authSource=admin
+      JWT_SECRET: dev-jwt-secret-key-change-in-production
+      # Mock API keys for development
+      WEATHER_API_KEY: dev-weather-key
+      SOIL_API_KEY: dev-soil-key
+      GEOCODING_API_KEY: dev-geocoding-key
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./backend/logs:/app/logs
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+      VITE_ENABLE_PWA: true
+      VITE_ENABLE_DEBUG: true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - ./frontend/dist:/app/dist
+    ports:
+      - "3000:3000"
+    command: npm run dev
+
+  # MongoDB Express for database management
+  mongo-express:
+    image: mongo-express:latest
+    container_name: agrisphere-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: password123
+      ME_CONFIG_MONGODB_URL: mongodb://admin:password123@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    depends_on:
+      - mongodb
+    networks:
+      - agrisphere-network
+
+  # Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: agrisphere-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - agrisphere-network
