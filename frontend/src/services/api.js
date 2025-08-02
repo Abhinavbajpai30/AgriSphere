@@ -386,4 +386,13 @@ export const planningApi = {
   getHarvestPlanning: (farmId, timeRange) => apiService.get(`/planning/harvest/${farmId}`, { params: { timeRange } }),
 }
 
+export const dashboardApi = {
+  getOverview: () => apiService.get('/dashboard/overview'),
+  getWeather: () => apiService.get('/dashboard/weather'),
+  getTasks: () => apiService.get('/dashboard/tasks'),
+  completeTask: (taskId) => apiService.post(`/dashboard/task/${taskId}/complete`),
+  getProgress: () => apiService.get('/dashboard/progress'),
+  getInsights: () => apiService.get('/dashboard/insights'),
+}
+
 export default apiService

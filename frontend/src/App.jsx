@@ -30,23 +30,25 @@ function App() {
         <LanguageProvider>
           <AuthProvider>
             <Router>
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-orange-50">
-      <AnimatePresence mode="wait">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Layout><Home /></Layout>} />
-          <Route path="/login" element={<Layout><Login /></Layout>} />
-          <Route path="/register" element={<Layout><Register /></Layout>} />
-          
-          {/* Onboarding Flow */}
-          <Route path="/onboarding/*" element={<Layout><OnboardingFlow /></Layout>} />
-          
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={
-            <ProtectedRoute>
-              <Layout><Dashboard /></Layout>
-            </ProtectedRoute>
-          } />
+              <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-orange-50">
+                <AnimatePresence mode="wait">
+                  <Routes>
+                    {/* Public Routes */}
+                    <Route path="/" element={<Layout><Home /></Layout>} />
+                    <Route path="/login" element={<Layout><Login /></Layout>} />
+                    <Route path="/register" element={<Layout><Register /></Layout>} />
+                    
+                    {/* Onboarding Flow */}
+                    <Route path="/onboarding/*" element={<Layout><OnboardingFlow /></Layout>} />
+                    
+                    {/* Protected Routes */}
+                    <Route path="/dashboard" element={
+                      <ProtectedRoute>
+                        <Layout><Dashboard /></Layout>
+                      </ProtectedRoute>
+                    } />
+                    
+
           
           <Route path="/farm" element={
             <ProtectedRoute>
