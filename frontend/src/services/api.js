@@ -51,22 +51,30 @@ class ApiService {
           return this.retryRequest(originalRequest)
         }
 
-        // Handle 401 errors (unauthorized)
+        // Handle 401 errors (unauthorized) - but not for auth endpoints
         if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true
+          // Don't attempt token refresh for login/register endpoints
+          const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || 
+                                originalRequest.url?.includes('/auth/register') ||
+                                originalRequest.url?.includes('/auth/forgot-password') ||
+                                originalRequest.url?.includes('/auth/reset-password');
           
-          try {
-            await this.refreshToken()
-            // Retry the original request with new token
-            const token = localStorage.getItem('agrisphere_token')
-            if (token) {
-              originalRequest.headers.Authorization = `Bearer ${token}`
-              return this.client(originalRequest)
+          if (!isAuthEndpoint) {
+            originalRequest._retry = true
+            
+            try {
+              await this.refreshToken()
+              // Retry the original request with new token
+              const token = localStorage.getItem('agrisphere_token')
+              if (token) {
+                originalRequest.headers.Authorization = `Bearer ${token}`
+                return this.client(originalRequest)
+              }
+            } catch (refreshError) {
+              // Refresh failed, redirect to login
+              this.handleAuthError()
+              return Promise.reject(refreshError)
             }
-          } catch (refreshError) {
-            // Refresh failed, redirect to login
-            this.handleAuthError()
-            return Promise.reject(refreshError)
           }
         }
 

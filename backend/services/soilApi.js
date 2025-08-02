@@ -1,156 +1,141 @@
 /**
  * Soil API Service for AgriSphere
- * Provides soil data crucial for crop management and farming decisions
- * Includes soil composition, pH, nutrients, and health indicators
+ * Provides soil data crucial for crop management and farming decisions through OpenEPI
+ * Refactored to use centralized OpenEPI service
  */
 
-const axios = require('axios');
+const openEpiService = require('./openEpiService');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 
 class SoilApiService {
   constructor() {
-    this.baseURL = process.env.SOIL_API_URL || 'https://api.soilapi.org/v1';
-    this.apiKey = process.env.SOIL_API_KEY;
-    this.retryAttempts = 3;
-    this.retryDelay = 2000;
+    this.openEpi = openEpiService;
     
-    // Create axios instance with default config
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 20000, // 20 seconds for soil data requests
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      }
-    });
+    // Soil data cache duration (longer for soil data as it changes slowly)
+    this.soilCacheTTL = 7200; // 2 hours
+    this.soilCompositionCacheTTL = 86400; // 24 hours
+    this.soilHealthCacheTTL = 3600; // 1 hour
   }
 
   /**
-   * Retry mechanism for failed requests
+   * Transform OpenEPI soil response to expected format
    */
-  async retryRequest(requestFn, attempt = 1) {
-    try {
-      return await requestFn();
-    } catch (error) {
-      if (attempt >= this.retryAttempts) {
-        throw error;
-      }
-      
-      logger.warn(`Soil API request failed (attempt ${attempt}/${this.retryAttempts}). Retrying...`, {
-        error: error.message,
-        attempt
-      });
-      
-      const delay = this.retryDelay * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryRequest(requestFn, attempt + 1);
-    }
+  transformSoilData(openEpiResponse) {
+    return {
+      soilType: openEpiResponse.soil_type || openEpiResponse.classification || 'unknown',
+      ph: openEpiResponse.ph || openEpiResponse.pH || null,
+      organicMatter: openEpiResponse.organic_matter || openEpiResponse.organicContent || null,
+      nitrogen: openEpiResponse.nitrogen || openEpiResponse.N || null,
+      phosphorus: openEpiResponse.phosphorus || openEpiResponse.P || null,
+      potassium: openEpiResponse.potassium || openEpiResponse.K || null,
+      moisture: openEpiResponse.moisture || openEpiResponse.water_content || null,
+      temperature: openEpiResponse.temperature || openEpiResponse.soil_temp || null,
+      salinity: openEpiResponse.salinity || openEpiResponse.ec || null,
+      cationExchangeCapacity: openEpiResponse.cec || openEpiResponse.cation_exchange_capacity || null,
+      bulkDensity: openEpiResponse.bulk_density || null,
+      porosity: openEpiResponse.porosity || null,
+      carbonContent: openEpiResponse.carbon || openEpiResponse.carbon_content || null,
+      lastUpdated: new Date(),
+      source: 'OpenEPI',
+      dataQuality: openEpiResponse.quality || 'medium'
+    };
+  }
+
+  /**
+   * Transform soil composition data
+   */
+  transformCompositionData(openEpiResponse) {
+    return {
+      sand: openEpiResponse.sand || openEpiResponse.sand_percentage || null,
+      clay: openEpiResponse.clay || openEpiResponse.clay_percentage || null,
+      silt: openEpiResponse.silt || openEpiResponse.silt_percentage || null,
+      gravel: openEpiResponse.gravel || openEpiResponse.gravel_content || null,
+      textureClass: openEpiResponse.texture_class || openEpiResponse.texture || null,
+      structure: openEpiResponse.structure || null,
+      color: openEpiResponse.color || null,
+      depth: openEpiResponse.depth || null,
+      drainage: openEpiResponse.drainage || openEpiResponse.drainage_class || null,
+      source: 'OpenEPI'
+    };
+  }
+
+  /**
+   * Transform soil health assessment data
+   */
+  transformHealthData(openEpiResponse) {
+    return {
+      healthScore: openEpiResponse.health_score || openEpiResponse.overall_score || null,
+      biologicalActivity: openEpiResponse.biological_activity || null,
+      microbialBiomass: openEpiResponse.microbial_biomass || null,
+      enzymeActivity: openEpiResponse.enzyme_activity || null,
+      erosionRisk: openEpiResponse.erosion_risk || null,
+      compactionLevel: openEpiResponse.compaction || null,
+      organicMatterTrend: openEpiResponse.om_trend || null,
+      recommendations: openEpiResponse.recommendations || [],
+      concerns: openEpiResponse.concerns || [],
+      source: 'OpenEPI'
+    };
   }
 
   /**
    * Get soil composition and properties for a location
    */
-  async getSoilProperties(lat, lon, depth = 30) {
+  async getSoilData(lat, lon, depth = 30) {
     try {
       if (!lat || !lon) {
         throw new ApiError('Latitude and longitude are required', 400);
       }
 
-      // Mock soil data for demonstration (replace with actual API call)
-      const mockSoilData = this.generateMockSoilData(lat, lon, depth);
+      const response = await this.openEpi.getSoilData(lat, lon, {
+        cacheTTL: this.soilCacheTTL
+      });
       
-      logger.info('Soil properties data retrieved successfully', { lat, lon, depth });
-      return mockSoilData;
-
-    } catch (error) {
-      logger.error('Failed to get soil properties', { lat, lon, error: error.message });
-      throw new ApiError('Soil properties service temporarily unavailable', 503);
-    }
-  }
-
-  /**
-   * Get soil nutrient analysis
-   */
-  async getSoilNutrients(lat, lon) {
-    try {
-      if (!lat || !lon) {
-        throw new ApiError('Latitude and longitude are required', 400);
-      }
-
-      // Mock nutrient data (replace with actual API call)
-      const nutrientData = {
-        location: { lat, lon },
-        nutrients: {
-          nitrogen: {
-            value: Math.random() * 100 + 20, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 100 + 20, 'nitrogen'),
-            recommendations: []
-          },
-          phosphorus: {
-            value: Math.random() * 50 + 10, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 50 + 10, 'phosphorus'),
-            recommendations: []
-          },
-          potassium: {
-            value: Math.random() * 200 + 50, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 200 + 50, 'potassium'),
-            recommendations: []
-          },
-          calcium: {
-            value: Math.random() * 1000 + 200, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 1000 + 200, 'calcium'),
-            recommendations: []
-          },
-          magnesium: {
-            value: Math.random() * 300 + 50, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 300 + 50, 'magnesium'),
-            recommendations: []
-          },
-          sulfur: {
-            value: Math.random() * 20 + 5, // mg/kg
-            status: this.getNutrientStatus(Math.random() * 20 + 5, 'sulfur'),
-            recommendations: []
-          }
-        },
-        micronutrients: {
-          iron: Math.random() * 10 + 2,
-          manganese: Math.random() * 5 + 1,
-          zinc: Math.random() * 3 + 0.5,
-          copper: Math.random() * 2 + 0.3,
-          boron: Math.random() * 1 + 0.2
-        },
-        recommendations: [
-          'Regular soil testing recommended every 2-3 years',
-          'Consider organic matter addition to improve soil structure',
-          'Monitor pH levels for optimal nutrient availability'
-        ],
-        timestamp: new Date().toISOString(),
-        source: 'SoilAPI'
+      const soilData = this.transformSoilData(response);
+      
+      logger.info('Soil data retrieved successfully via OpenEPI', { lat, lon, depth });
+      return {
+        location: { lat, lon, depth },
+        ...soilData,
+        timestamp: new Date().toISOString()
       };
 
-      // Add specific recommendations based on nutrient levels
-      Object.keys(nutrientData.nutrients).forEach(nutrient => {
-        const data = nutrientData.nutrients[nutrient];
-        if (data.status === 'low') {
-          data.recommendations.push(`Apply ${nutrient} fertilizer to address deficiency`);
-        } else if (data.status === 'high') {
-          data.recommendations.push(`Reduce ${nutrient} application to prevent toxicity`);
-        }
-      });
-
-      logger.info('Soil nutrients data retrieved successfully', { lat, lon });
-      return nutrientData;
-
     } catch (error) {
-      logger.error('Failed to get soil nutrients', { lat, lon, error: error.message });
-      throw new ApiError('Soil nutrients service temporarily unavailable', 503);
+      logger.error('Failed to get soil data from OpenEPI', { lat, lon, error: error.message });
+      throw error; // Let OpenEPI service handle error transformation
     }
   }
 
   /**
-   * Get soil health indicators and recommendations
+   * Get detailed soil composition
+   */
+  async getSoilComposition(lat, lon, depth = 30) {
+    try {
+      if (!lat || !lon) {
+        throw new ApiError('Latitude and longitude are required', 400);
+      }
+
+      const response = await this.openEpi.getSoilComposition(lat, lon, depth, {
+        cacheTTL: this.soilCompositionCacheTTL
+      });
+      
+      const compositionData = this.transformCompositionData(response);
+      
+      logger.info('Soil composition data retrieved successfully via OpenEPI', { lat, lon, depth });
+      return {
+        location: { lat, lon, depth },
+        composition: compositionData,
+        timestamp: new Date().toISOString()
+      };
+
+    } catch (error) {
+      logger.error('Failed to get soil composition from OpenEPI', { lat, lon, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Get soil health assessment
    */
   async getSoilHealth(lat, lon) {
     try {
@@ -158,103 +143,251 @@ class SoilApiService {
         throw new ApiError('Latitude and longitude are required', 400);
       }
 
-      const healthData = {
+      const response = await this.openEpi.getSoilHealth(lat, lon, {
+        cacheTTL: this.soilHealthCacheTTL
+      });
+      
+      const healthData = this.transformHealthData(response);
+      
+      logger.info('Soil health data retrieved successfully via OpenEPI', { lat, lon });
+      return {
         location: { lat, lon },
-        healthScore: Math.floor(Math.random() * 40) + 60, // Score 60-100
-        indicators: {
-          organicMatter: {
-            percentage: (Math.random() * 3 + 1).toFixed(2),
-            status: Math.random() > 0.5 ? 'good' : 'needs_improvement',
-            impact: 'Improves water retention and nutrient availability'
-          },
-          soilStructure: {
-            rating: Math.random() > 0.3 ? 'good' : 'poor',
-            porosity: (Math.random() * 20 + 30).toFixed(1) + '%',
-            impact: 'Affects root penetration and water infiltration'
-          },
-          biologicalActivity: {
-            microbialBiomass: Math.floor(Math.random() * 200) + 100, // μg C/g soil
-            earthwormCount: Math.floor(Math.random() * 15) + 5, // per m²
-            status: Math.random() > 0.4 ? 'active' : 'low',
-            impact: 'Essential for nutrient cycling and soil fertility'
-          },
-          waterHoldingCapacity: {
-            capacity: (Math.random() * 0.3 + 0.2).toFixed(2), // cm³/cm³
-            rating: Math.random() > 0.3 ? 'adequate' : 'low',
-            impact: 'Critical for drought resilience and irrigation efficiency'
-          }
-        },
-        risks: [],
-        recommendations: [
-          'Maintain ground cover to prevent erosion',
-          'Add organic matter through compost or crop residues',
-          'Practice crop rotation to improve soil biodiversity',
-          'Minimize tillage to preserve soil structure'
-        ],
-        timestamp: new Date().toISOString(),
-        source: 'SoilAPI'
+        health: healthData,
+        timestamp: new Date().toISOString()
       };
 
-      // Add risk assessments
-      if (healthData.indicators.organicMatter.percentage < 2) {
-        healthData.risks.push({
-          type: 'low_organic_matter',
-          severity: 'moderate',
-          description: 'Low organic matter may reduce soil fertility and water retention'
-        });
-      }
-
-      if (healthData.indicators.biologicalActivity.status === 'low') {
-        healthData.risks.push({
-          type: 'poor_biological_activity',
-          severity: 'moderate',
-          description: 'Low biological activity may indicate soil health issues'
-        });
-      }
-
-      logger.info('Soil health data retrieved successfully', { lat, lon });
-      return healthData;
-
     } catch (error) {
-      logger.error('Failed to get soil health', { lat, lon, error: error.message });
-      throw new ApiError('Soil health service temporarily unavailable', 503);
+      logger.error('Failed to get soil health from OpenEPI', { lat, lon, error: error.message });
+      throw error;
     }
   }
 
   /**
-   * Generate mock soil data (replace with actual API integration)
+   * Get soil nutrient analysis using OpenEPI
    */
-  generateMockSoilData(lat, lon, depth) {
-    const soilTypes = ['Loam', 'Clay', 'Sandy', 'Silty', 'Clay Loam', 'Sandy Loam'];
-    const selectedType = soilTypes[Math.floor(Math.random() * soilTypes.length)];
+  async getSoilNutrients(lat, lon) {
+    try {
+      if (!lat || !lon) {
+        throw new ApiError('Latitude and longitude are required', 400);
+      }
 
-    return {
-      location: { lat, lon },
-      depth: depth,
-      soilType: selectedType,
-      properties: {
-        pH: (Math.random() * 4 + 5).toFixed(1), // pH 5.0-9.0
-        electricalConductivity: (Math.random() * 2).toFixed(2), // dS/m
-        organicCarbon: (Math.random() * 2 + 0.5).toFixed(2), // %
-        cationExchangeCapacity: Math.floor(Math.random() * 30) + 10, // cmol/kg
-        bulkDensity: (Math.random() * 0.5 + 1.2).toFixed(2), // g/cm³
-        moisture: (Math.random() * 30 + 10).toFixed(1) // %
+      // Get soil data from OpenEPI which includes nutrient information
+      const response = await this.openEpi.getSoilData(lat, lon, {
+        cacheTTL: this.soilCacheTTL
+      });
+      
+      const transformedData = this.transformSoilData(response);
+      
+      const nutrientData = {
+        location: { lat, lon },
+        nutrients: {
+          nitrogen: {
+            value: transformedData.nitrogen,
+            status: this.getNutrientStatus(transformedData.nitrogen, 'nitrogen'),
+            recommendations: this.getNutrientRecommendations(transformedData.nitrogen, 'nitrogen')
+          },
+          phosphorus: {
+            value: transformedData.phosphorus,
+            status: this.getNutrientStatus(transformedData.phosphorus, 'phosphorus'),
+            recommendations: this.getNutrientRecommendations(transformedData.phosphorus, 'phosphorus')
+          },
+          potassium: {
+            value: transformedData.potassium,
+            status: this.getNutrientStatus(transformedData.potassium, 'potassium'),
+            recommendations: this.getNutrientRecommendations(transformedData.potassium, 'potassium')
+          }
+        },
+        soilProperties: {
+          ph: transformedData.ph,
+          organicMatter: transformedData.organicMatter,
+          cationExchangeCapacity: transformedData.cationExchangeCapacity,
+          salinity: transformedData.salinity
+        },
+        generalRecommendations: this.generateSoilRecommendations(transformedData),
+        timestamp: new Date().toISOString(),
+        source: 'OpenEPI'
+      };
+
+      logger.info('Soil nutrients data retrieved successfully via OpenEPI', { lat, lon });
+      return nutrientData;
+
+    } catch (error) {
+      logger.error('Failed to get soil nutrients from OpenEPI', { lat, lon, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Generate nutrient recommendations based on levels
+   */
+  getNutrientRecommendations(value, nutrient) {
+    if (!value) return ['Data not available - consider soil testing'];
+    
+    const status = this.getNutrientStatus(value, nutrient);
+    
+    const recommendations = {
+      nitrogen: {
+        low: ['Apply nitrogen fertilizer', 'Consider legume cover crops', 'Add compost or manure'],
+        high: ['Reduce nitrogen inputs', 'Plant nitrogen-consuming crops', 'Monitor for leaching'],
+        optimal: ['Maintain current nitrogen management practices']
       },
-      texture: {
-        sand: Math.floor(Math.random() * 60) + 20, // %
-        silt: Math.floor(Math.random() * 40) + 10, // %
-        clay: Math.floor(Math.random() * 30) + 10  // %
+      phosphorus: {
+        low: ['Apply phosphorus fertilizer', 'Use bone meal or rock phosphate', 'Improve mycorrhizal associations'],
+        high: ['Reduce phosphorus inputs', 'Monitor runoff to prevent water pollution', 'Test soil regularly'],
+        optimal: ['Continue balanced phosphorus management']
       },
-      drainage: Math.random() > 0.5 ? 'well-drained' : 'moderately-drained',
-      erosionRisk: Math.random() > 0.7 ? 'high' : Math.random() > 0.4 ? 'moderate' : 'low',
-      recommendations: [
-        'Monitor soil moisture regularly',
-        'Test soil pH annually',
-        'Consider lime application if pH is below 6.0'
-      ],
-      timestamp: new Date().toISOString(),
-      source: 'SoilAPI'
+      potassium: {
+        low: ['Apply potassium fertilizer', 'Use wood ash or greensand', 'Add compost'],
+        high: ['Reduce potassium inputs', 'Monitor for salt buildup', 'Ensure adequate calcium and magnesium'],
+        optimal: ['Maintain current potassium levels']
+      }
     };
+    
+    return recommendations[nutrient]?.[status] || ['Consult agricultural specialist for specific recommendations'];
+  }
+
+  /**
+   * Generate general soil recommendations based on all properties
+   */
+  generateSoilRecommendations(soilData) {
+    const recommendations = [];
+    
+    if (soilData.ph < 6.0) {
+      recommendations.push('Consider lime application to raise pH for better nutrient availability');
+    } else if (soilData.ph > 8.0) {
+      recommendations.push('Consider sulfur application to lower pH');
+    }
+    
+    if (soilData.organicMatter < 2.0) {
+      recommendations.push('Increase organic matter through compost, cover crops, or green manure');
+    }
+    
+    if (soilData.salinity > 2.0) {
+      recommendations.push('Address soil salinity through improved drainage or salt-tolerant crops');
+    }
+    
+    if (soilData.cationExchangeCapacity < 10) {
+      recommendations.push('Improve soil CEC through organic matter addition and clay amendments');
+    }
+    
+    // General recommendations
+    recommendations.push('Regular soil testing every 2-3 years');
+    recommendations.push('Practice crop rotation to maintain soil health');
+    recommendations.push('Minimize soil compaction through proper equipment use');
+    
+    return recommendations;
+  }
+
+  /**
+   * Get soil suitability for specific crops
+   */
+  async getSoilSuitability(lat, lon, cropType) {
+    try {
+      if (!lat || !lon || !cropType) {
+        throw new ApiError('Latitude, longitude, and crop type are required', 400);
+      }
+
+      const [soilData, soilHealth] = await Promise.all([
+        this.getSoilData(lat, lon),
+        this.getSoilHealth(lat, lon)
+      ]);
+
+      const suitability = this.assessCropSuitability(soilData, soilHealth, cropType);
+      
+      logger.info('Soil suitability assessment completed via OpenEPI', { lat, lon, cropType });
+      return {
+        location: { lat, lon },
+        cropType,
+        suitability,
+        timestamp: new Date().toISOString(),
+        source: 'OpenEPI'
+      };
+
+    } catch (error) {
+      logger.error('Failed to assess soil suitability', { lat, lon, cropType, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Assess crop suitability based on soil conditions
+   */
+  assessCropSuitability(soilData, healthData, cropType) {
+    const cropRequirements = {
+      tomato: { phMin: 6.0, phMax: 7.0, drainageNeeded: 'good', organicMatter: 3.0 },
+      corn: { phMin: 6.0, phMax: 6.8, drainageNeeded: 'good', organicMatter: 2.5 },
+      wheat: { phMin: 6.0, phMax: 7.5, drainageNeeded: 'moderate', organicMatter: 2.0 },
+      rice: { phMin: 5.5, phMax: 7.0, drainageNeeded: 'poor', organicMatter: 2.0 },
+      potato: { phMin: 5.0, phMax: 6.5, drainageNeeded: 'good', organicMatter: 3.0 },
+      default: { phMin: 6.0, phMax: 7.0, drainageNeeded: 'good', organicMatter: 2.5 }
+    };
+
+    const requirements = cropRequirements[cropType] || cropRequirements.default;
+    const limitations = [];
+    const recommendations = [];
+
+    // pH assessment
+    if (soilData.ph < requirements.phMin) {
+      limitations.push('pH too low for optimal growth');
+      recommendations.push('Apply lime to raise soil pH');
+    } else if (soilData.ph > requirements.phMax) {
+      limitations.push('pH too high for optimal growth');
+      recommendations.push('Apply sulfur or organic matter to lower pH');
+    }
+
+    // Organic matter assessment
+    if (soilData.organicMatter < requirements.organicMatter) {
+      limitations.push('Low organic matter content');
+      recommendations.push('Increase organic matter through compost or cover crops');
+    }
+
+    // Health score assessment
+    if (healthData.health.healthScore < 70) {
+      limitations.push('Poor soil health indicators');
+      recommendations.push('Improve soil health through biological amendments');
+    }
+
+    const score = this.calculateSuitabilityScore(soilData, healthData, requirements);
+    
+    return {
+      score,
+      rating: this.getSuitabilityRating(score),
+      limitations,
+      recommendations,
+      details: {
+        ph: { current: soilData.ph, optimal: `${requirements.phMin}-${requirements.phMax}` },
+        organicMatter: { current: soilData.organicMatter, optimal: `>${requirements.organicMatter}%` },
+        healthScore: healthData.health.healthScore
+      }
+    };
+  }
+
+  calculateSuitabilityScore(soilData, healthData, requirements) {
+    let score = 100;
+    
+    // pH scoring
+    const phDiff = Math.min(
+      Math.abs(soilData.ph - requirements.phMin),
+      Math.abs(soilData.ph - requirements.phMax)
+    );
+    if (phDiff > 0.5) score -= Math.min(phDiff * 10, 30);
+    
+    // Organic matter scoring
+    if (soilData.organicMatter < requirements.organicMatter) {
+      score -= (requirements.organicMatter - soilData.organicMatter) * 10;
+    }
+    
+    // Health score factor
+    score = score * (healthData.health.healthScore / 100);
+    
+    return Math.max(0, Math.round(score));
+  }
+
+  getSuitabilityRating(score) {
+    if (score >= 80) return 'excellent';
+    if (score >= 60) return 'good';
+    if (score >= 40) return 'fair';
+    return 'poor';
   }
 
   /**

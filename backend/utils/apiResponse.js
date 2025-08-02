@@ -323,7 +323,9 @@ const trackResponseTime = (req, res, next) => {
 
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-    res.set('X-Response-Time', `${duration}ms`);
+    
+    // Don't set headers after response is finished
+    // res.set('X-Response-Time', `${duration}ms`);
 
     // Log slow requests
     if (duration > 5000) { // 5 seconds

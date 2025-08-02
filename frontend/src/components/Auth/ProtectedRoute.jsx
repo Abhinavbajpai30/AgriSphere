@@ -33,13 +33,13 @@ const ProtectedRoute = ({ children, requireAuth = true, redirectTo = '/login' })
     )
   }
 
-  // User profile completion check
+  // User profile completion check - redirect to onboarding if incomplete
   if (isAuthenticated && user && !isProfileComplete(user)) {
-    // If user hasn't completed profile setup, redirect to profile completion
-    if (location.pathname !== '/profile/complete') {
+    // If user hasn't completed onboarding, redirect to onboarding flow
+    if (!location.pathname.startsWith('/onboarding')) {
       return (
         <Navigate 
-          to="/profile/complete" 
+          to="/onboarding" 
           state={{ from: location }} 
           replace 
         />
@@ -63,33 +63,13 @@ const ProtectedRoute = ({ children, requireAuth = true, redirectTo = '/login' })
 // Helper function to check if user profile is complete
 const isProfileComplete = (user) => {
   if (!user || !user.personalInfo) return false
-
-  const { personalInfo, farmingProfile, location } = user
-
-  // Check required personal information
-  const hasPersonalInfo = !!(
-    personalInfo.firstName &&
-    personalInfo.lastName &&
-    personalInfo.phoneNumber
-  )
-
-  // Check if user has completed basic farming profile
-  const hasFarmingProfile = !!(
-    farmingProfile &&
-    farmingProfile.experienceLevel &&
-    farmingProfile.farmingType &&
-    farmingProfile.primaryCrops &&
-    farmingProfile.primaryCrops.length > 0
-  )
-
-  // Check if user has provided location
-  const hasLocation = !!(
-    location &&
-    location.coordinates &&
-    location.coordinates.length === 2
-  )
-
-  return hasPersonalInfo && hasFarmingProfile && hasLocation
+  
+  // Check if user has completed onboarding
+  return user.appUsage?.onboardingCompleted === true &&
+         user.personalInfo?.firstName &&
+         user.personalInfo?.lastName &&
+         user.location?.coordinates &&
+         user.farmingProfile?.experienceLevel
 }
 
 // HOC for role-based access control

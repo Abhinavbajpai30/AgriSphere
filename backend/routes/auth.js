@@ -14,6 +14,9 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+// Import authentication middleware
+const { authenticateUser } = require('../middleware/auth');
+
 // Validation middleware for user registration
 const validateRegistration = [
   body('personalInfo.firstName')
@@ -41,20 +44,24 @@ const validateRegistration = [
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),
   
-  body('location.address')
-    .trim()
-    .isLength({ min: 5 })
-    .withMessage('Address must be at least 5 characters long'),
-  
-  body('location.coordinates.latitude')
-    .isFloat({ min: -90, max: 90 })
-    .withMessage('Latitude must be between -90 and 90'),
-  
-  body('location.coordinates.longitude')
-    .isFloat({ min: -180, max: 180 })
-    .withMessage('Longitude must be between -180 and 180'),
-  
+  body('location.coordinates')
+    .optional()
+    .custom((value) => {
+      if (Array.isArray(value)) {
+        return value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number';
+      }
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        return typeof value.latitude === 'number' && typeof value.longitude === 'number';
+      }
+      // Pass if it's an object or an array that fits the criteria.
+      // The payload may send other object-like things that should fail.
+      if (typeof value !== 'object' || value === null) return true; // Let it pass if it is not an object, optional() should handle it.
+      
+      return false;
+    })
+    .withMessage('Coordinates must be an array of two numbers or an object with latitude and longitude.'),
   body('location.country')
+    .optional()
     .trim()
     .isLength({ min: 2 })
     .withMessage('Country is required'),
@@ -64,7 +71,7 @@ const validateRegistration = [
     .withMessage('Experience level must be one of: beginner, intermediate, experienced, expert'),
   
   body('farmingProfile.farmingType')
-    .isIn(['crop_only', 'livestock_only', 'mixed_farming', 'organic', 'subsistence', 'commercial'])
+    .isIn(['subsistence', 'commercial', 'organic', 'mixed'])
     .withMessage('Invalid farming type'),
   
   body('preferences.language')
@@ -110,6 +117,8 @@ const validatePasswordReset = [
  * @access  Public
  */
 router.post('/register', validateRegistration, handleValidationErrors, asyncHandler(async (req, res) => {
+  console.log('Registration request received:', req.body)
+  
   const {
     personalInfo,
     authentication,
@@ -146,14 +155,43 @@ router.post('/register', validateRegistration, handleValidationErrors, asyncHand
     }
   }
 
+  const { farmSize, ...restOfFarmingProfile } = farmingProfile || {};
+
+  // Handle location data safely
+  let locationData = {};
+  if (location) {
+    const coordinates = Array.isArray(location.coordinates)
+      ? { latitude: location.coordinates[0], longitude: location.coordinates[1] }
+      : location.coordinates;
+    
+    locationData = {
+      ...location,
+      address: location.address || 'N/A',
+      coordinates: coordinates ? {
+        latitude: coordinates.latitude ?? 0,
+        longitude: coordinates.longitude ?? 0,
+      } : undefined,
+    };
+  }
+
   // Create new user
   const newUser = new User({
     personalInfo,
     authentication,
-    location,
-    farmingProfile,
+    location: locationData,
+    farmingProfile: {
+      ...restOfFarmingProfile,
+      totalFarmArea: farmSize ? {
+        value: farmSize,
+      } : undefined,
+    },
     preferences: {
       ...preferences,
+      units: {
+        temperature: 'celsius',
+        measurement: 'metric',
+        currency: 'USD',
+      },
       language: preferences.language || 'en'
     },
     appUsage: {
@@ -501,54 +539,30 @@ router.post('/refresh-token', asyncHandler(async (req, res) => {
   }
 }));
 
+
+
 /**
  * @route   GET /api/auth/me
  * @desc    Get current user information
  * @access  Private
  */
-router.get('/me', asyncHandler(async (req, res) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-
-  if (!token) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'No token provided',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const user = await User.findById(decoded.userId);
-    
-    if (!user || !user.status.isActive) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'User not found or inactive',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Remove sensitive information
-    const userResponse = user.toJSON();
-    delete userResponse.authentication;
-
-    res.json({
-      status: 'success',
-      data: {
-        user: userResponse
-      },
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Invalid token',
-      timestamp: new Date().toISOString()
-    });
-  }
+router.get('/me', authenticateUser, asyncHandler(async (req, res) => {
+  // User is attached to req by authenticateUser middleware
+  const user = req.user.toJSON();
+  
+  // Remove sensitive information
+  delete user.authentication;
+  
+  logger.info('User profile retrieved', { userId: user._id });
+  
+  res.json({
+    status: 'success',
+    message: 'User profile retrieved successfully',
+    data: {
+      user: user
+    },
+    timestamp: new Date().toISOString()
+  });
 }));
 
 module.exports = router;

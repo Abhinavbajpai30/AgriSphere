@@ -10,20 +10,12 @@ const { ApiError } = require('../middleware/errorHandler');
 
 class CropHealthApiService {
   constructor() {
-    this.baseURL = process.env.OPENEPI_BASE_URL || 'https://api.plantnet.org/v1';
-    this.apiKey = process.env.OPENEPI_API_KEY;
-    this.retryAttempts = 3;
-    this.retryDelay = 2000;
+    this.openEpi = require('./openEpiService');
     
-    // Create axios instance with default config
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 30000, // 30 seconds for image analysis
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      }
-    });
+    // Crop health cache duration
+    this.cropAnalysisCacheTTL = 3600; // 1 hour
+    this.diseaseInfoCacheTTL = 86400; // 24 hours
+    this.treatmentCacheTTL = 43200; // 12 hours
 
     // Common crop diseases database
     this.diseaseDatabase = {
@@ -104,26 +96,70 @@ class CropHealthApiService {
   }
 
   /**
-   * Retry mechanism for failed requests
+   * Analyze crop image for diseases using OpenEPI
    */
-  async retryRequest(requestFn, attempt = 1) {
+  async analyzeCropImage(imageData, cropType, location = null) {
     try {
-      return await requestFn();
-    } catch (error) {
-      if (attempt >= this.retryAttempts) {
-        throw error;
-      }
-      
-      logger.warn(`Crop Health API request failed (attempt ${attempt}/${this.retryAttempts}). Retrying...`, {
-        error: error.message,
-        attempt
+      const response = await this.openEpi.analyzeCropImage(imageData, cropType, {
+        useCache: false // Don't cache image analysis
       });
+
+      const analysis = this.transformCropAnalysis(response, cropType);
       
-      const delay = this.retryDelay * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryRequest(requestFn, attempt + 1);
+      logger.info('Crop image analysis completed via OpenEPI', { cropType });
+      return analysis;
+
+    } catch (error) {
+      logger.error('Failed to analyze crop image via OpenEPI', { cropType, error: error.message });
+      throw error;
     }
+  }
+
+  /**
+   * Get crop disease information using OpenEPI
+   */
+  async getCropDiseases(cropType, region = null) {
+    try {
+      const response = await this.openEpi.getCropDiseases(cropType, region, {
+        cacheTTL: this.diseaseInfoCacheTTL
+      });
+
+      logger.info('Crop diseases retrieved via OpenEPI', { cropType, region });
+      return this.transformDiseaseData(response, cropType);
+
+    } catch (error) {
+      logger.error('Failed to get crop diseases via OpenEPI', { cropType, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform OpenEPI crop analysis response
+   */
+  transformCropAnalysis(response, cropType) {
+    return {
+      cropType,
+      analysis: {
+        diseases: response.diseases || [],
+        healthScore: response.health_score || response.healthScore || 80,
+        confidence: response.confidence || 0.8,
+        recommendations: response.recommendations || []
+      },
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
+  }
+
+  /**
+   * Transform disease data response
+   */
+  transformDiseaseData(response, cropType) {
+    return {
+      cropType,
+      diseases: response.diseases || response.data || [],
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
   }
 
   /**

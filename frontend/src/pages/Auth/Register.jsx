@@ -112,14 +112,21 @@ const Register = () => {
         }
       }
 
+      // Call the registration API
+      console.log('Registering user with data:', userData)
       const result = await register(userData)
+      console.log('Registration result:', result)
       
       if (result.success) {
-        navigate('/dashboard')
+        // Registration successful, redirect to onboarding
+        console.log('Registration successful, redirecting to onboarding')
+        navigate('/onboarding')
       } else {
-        setError(result.error)
+        console.error('Registration failed:', result.error)
+        setError(result.error || 'Registration failed. Please try again.')
       }
     } catch (err) {
+      console.error('Registration error:', err)
       setError('Registration failed. Please try again.')
     } finally {
       setIsLoading(false)

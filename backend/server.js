@@ -24,6 +24,7 @@ const diagnosisRoutes = require('./routes/diagnosis');
 const irrigationRoutes = require('./routes/irrigation');
 const planningRoutes = require('./routes/planning');
 const healthRoutes = require('./routes/health');
+const onboardingRoutes = require('./routes/onboarding');
 
 // Import middleware
 const { addRequestContext } = require('./middleware/auth');
@@ -107,6 +108,7 @@ app.use('/api/farm', farmRoutes);
 app.use('/api/diagnosis', diagnosisRoutes);
 app.use('/api/irrigation', irrigationRoutes);
 app.use('/api/planning', planningRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 // Catch-all route for undefined routes
 app.all('*', (req, res) => {

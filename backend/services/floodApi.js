@@ -10,43 +10,75 @@ const { ApiError } = require('../middleware/errorHandler');
 
 class FloodApiService {
   constructor() {
-    this.baseURL = process.env.OPENEPI_BASE_URL || 'https://api.floodservice.org/v1';
-    this.apiKey = process.env.OPENEPI_API_KEY;
-    this.retryAttempts = 3;
-    this.retryDelay = 2000;
+    this.openEpi = require('./openEpiService');
     
-    // Create axios instance with default config
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 25000, // 25 seconds for flood data
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`
-      }
-    });
+    // Flood data cache duration
+    this.floodRiskCacheTTL = 3600; // 1 hour
+    this.floodForecastCacheTTL = 1800; // 30 minutes
+    this.floodHistoryCacheTTL = 86400; // 24 hours
   }
 
   /**
-   * Retry mechanism for failed requests
+   * Get flood risk assessment using OpenEPI
    */
-  async retryRequest(requestFn, attempt = 1) {
+  async getFloodRisk(lat, lon) {
     try {
-      return await requestFn();
-    } catch (error) {
-      if (attempt >= this.retryAttempts) {
-        throw error;
-      }
-      
-      logger.warn(`Flood API request failed (attempt ${attempt}/${this.retryAttempts}). Retrying...`, {
-        error: error.message,
-        attempt
+      const response = await this.openEpi.getFloodRisk(lat, lon, {
+        cacheTTL: this.floodRiskCacheTTL
       });
-      
-      const delay = this.retryDelay * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryRequest(requestFn, attempt + 1);
+
+      logger.info('Flood risk assessment retrieved via OpenEPI', { lat, lon });
+      return this.transformFloodRisk(response, lat, lon);
+
+    } catch (error) {
+      logger.error('Failed to get flood risk via OpenEPI', { lat, lon, error: error.message });
+      throw error;
     }
+  }
+
+  /**
+   * Get flood forecast using OpenEPI
+   */
+  async getFloodForecast(lat, lon, days = 7) {
+    try {
+      const response = await this.openEpi.getFloodForecast(lat, lon, days, {
+        cacheTTL: this.floodForecastCacheTTL
+      });
+
+      logger.info('Flood forecast retrieved via OpenEPI', { lat, lon, days });
+      return this.transformFloodForecast(response, lat, lon);
+
+    } catch (error) {
+      logger.error('Failed to get flood forecast via OpenEPI', { lat, lon, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform flood risk response
+   */
+  transformFloodRisk(response, lat, lon) {
+    return {
+      location: { lat, lon },
+      riskLevel: response.risk_level || response.riskLevel || 'moderate',
+      riskScore: response.risk_score || response.riskScore || 50,
+      factors: response.factors || [],
+      recommendations: response.recommendations || [],
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
+  }
+
+  /**
+   * Transform flood forecast response
+   */
+  transformFloodForecast(response, lat, lon) {
+    return {
+      location: { lat, lon },
+      forecast: response.forecast || response.data || [],
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
   }
 
   /**

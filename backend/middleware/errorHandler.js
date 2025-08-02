@@ -94,6 +94,14 @@ const formatErrorResponse = (error, req) => {
  * Main error handling middleware
  */
 const errorHandler = (error, req, res, next) => {
+  if (res.headersSent) {
+    logger.error('Error occurred after headers were sent. Passing to default error handler.', {
+      error: error.message,
+      requestId: req.id,
+    });
+    return next(error);
+  }
+
   let err = { ...error };
   err.message = error.message;
 

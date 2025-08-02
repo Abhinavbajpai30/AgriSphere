@@ -103,26 +103,22 @@ const userSchema = new mongoose.Schema({
   location: {
     address: {
       type: String,
-      required: [true, 'Address is required'],
       trim: true
     },
     coordinates: {
       latitude: {
         type: Number,
-        required: [true, 'Latitude is required'],
         min: [-90, 'Latitude must be between -90 and 90'],
         max: [90, 'Latitude must be between -90 and 90']
       },
       longitude: {
         type: Number,
-        required: [true, 'Longitude is required'],
         min: [-180, 'Longitude must be between -180 and 180'],
         max: [180, 'Longitude must be between -180 and 180']
       }
     },
     country: {
       type: String,
-      required: [true, 'Country is required'],
       trim: true
     },
     region: { // State/Province
@@ -214,13 +210,11 @@ const userSchema = new mongoose.Schema({
   farmingProfile: {
     experienceLevel: {
       type: String,
-      enum: ['beginner', 'intermediate', 'experienced', 'expert'],
-      required: [true, 'Experience level is required']
+      enum: ['beginner', 'intermediate', 'experienced', 'expert']
     },
     farmingType: {
       type: String,
-      enum: ['crop_only', 'livestock_only', 'mixed_farming', 'organic', 'subsistence', 'commercial'],
-      required: [true, 'Farming type is required']
+      enum: ['crop_only', 'livestock_only', 'mixed_farming', 'organic', 'subsistence', 'commercial']
     },
     primaryCrops: [{
       type: String,
@@ -260,6 +254,10 @@ const userSchema = new mongoose.Schema({
     lastActiveDate: {
       type: Date,
       default: Date.now
+    },
+    onboardingCompleted: {
+      type: Boolean,
+      default: false
     },
     totalDiagnoses: {
       type: Number,

@@ -47,7 +47,7 @@ const Layout = ({ children }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-orange-50 relative overflow-hidden">
+    <div className="relative overflow-hidden">
       {/* Background decoration */}
       <div className="absolute inset-0 opacity-30">
         <div className="absolute top-0 left-0 w-72 h-72 bg-primary-200 rounded-full mix-blend-multiply filter blur-xl animate-blob"></div>
@@ -73,7 +73,7 @@ const Layout = ({ children }) => {
 
       {/* Main Content */}
       <main className={`relative z-10 ${showNavigation ? 'pb-20' : ''}`}>
-        <AnimatePresence mode="wait" initial={false}>
+        <AnimatePresence mode="wait">
           <motion.div
             key={location.pathname}
             initial="initial"

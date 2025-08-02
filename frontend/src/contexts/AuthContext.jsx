@@ -20,8 +20,8 @@ export const AuthProvider = ({ children }) => {
       try {
         // Verify token with backend
         const response = await apiService.get('/auth/me')
-        if (response.data && response.data.user) {
-          setUser(response.data.user)
+        if (response.data && response.data.data && response.data.data.user) {
+          setUser(response.data.data.user)
           setIsAuthenticated(true)
           apiService.setAuthToken(token)
         } else {
@@ -46,8 +46,8 @@ export const AuthProvider = ({ children }) => {
         password
       })
 
-      if (response.data && response.data.token) {
-        const { token, user: userData } = response.data
+      if (response.data && response.data.data && response.data.data.token) {
+        const { token, user: userData } = response.data.data
         
         // Store token
         localStorage.setItem('agrisphere_token', token)
@@ -83,8 +83,8 @@ export const AuthProvider = ({ children }) => {
       
       const response = await apiService.post('/auth/register', userData)
 
-      if (response.data && response.data.token) {
-        const { token, user: newUser } = response.data
+      if (response.data && response.data.data && response.data.data.token) {
+        const { token, user: newUser } = response.data.data
         
         // Store token
         localStorage.setItem('agrisphere_token', token)
@@ -153,6 +153,21 @@ export const AuthProvider = ({ children }) => {
         success: false, 
         error: errorMessage 
       }
+    }
+  }
+
+  const refreshUser = async () => {
+    try {
+      const response = await apiService.get('/auth/me')
+      if (response.data && response.data.data && response.data.data.user) {
+        setUser(response.data.data.user)
+        return { success: true, user: response.data.data.user }
+      } else {
+        throw new Error('Invalid user data response')
+      }
+    } catch (error) {
+      console.error('User refresh failed:', error)
+      return { success: false, error: error.message }
     }
   }
 
@@ -263,6 +278,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     updateUser,
+    refreshUser,
     refreshToken,
     requestPasswordReset,
     resetPassword,

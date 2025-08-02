@@ -244,6 +244,7 @@ const addRequestContext = (req, res, next) => {
   res.json = function(data) {
     const duration = Date.now() - req.startTime;
     
+    // Log before sending response to avoid timing issues
     logger.info('Request completed', {
       requestId: req.id,
       method: req.method,
@@ -253,6 +254,7 @@ const addRequestContext = (req, res, next) => {
       userId: req.user?._id
     });
 
+    // Call original json method and return its result
     return originalJson.call(this, data);
   };
 

@@ -1,62 +1,88 @@
 /**
  * Weather API Service for AgriSphere
- * Provides weather data critical for farming decisions
- * Includes retry logic for unreliable internet connections
+ * Provides weather data critical for farming decisions through OpenEPI
+ * Refactored to use centralized OpenEPI service
  */
 
-const axios = require('axios');
+const openEpiService = require('./openEpiService');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 
 class WeatherApiService {
   constructor() {
-    this.baseURL = process.env.WEATHER_API_URL || 'https://api.openweathermap.org/data/2.5';
-    this.apiKey = process.env.WEATHER_API_KEY;
-    this.retryAttempts = 3;
-    this.retryDelay = 2000; // 2 seconds
+    this.openEpi = openEpiService;
     
-    // Create axios instance with default config
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: 15000, // 15 seconds timeout for slow connections
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    });
-
-    // Add request interceptor for API key
-    this.client.interceptors.request.use((config) => {
-      config.params = {
-        ...config.params,
-        appid: this.apiKey,
-        units: 'metric' // Use Celsius for temperature
-      };
-      return config;
-    });
+    // Weather data cache duration (shorter for weather data)
+    this.weatherCacheTTL = 1800; // 30 minutes
+    this.forecastCacheTTL = 3600; // 1 hour
+    this.historicalCacheTTL = 86400; // 24 hours
   }
 
   /**
-   * Retry mechanism for failed requests
+   * Transform OpenEPI weather response to expected format
    */
-  async retryRequest(requestFn, attempt = 1) {
-    try {
-      return await requestFn();
-    } catch (error) {
-      if (attempt >= this.retryAttempts) {
-        throw error;
-      }
-      
-      logger.warn(`Weather API request failed (attempt ${attempt}/${this.retryAttempts}). Retrying...`, {
-        error: error.message,
-        attempt
-      });
-      
-      // Exponential backoff
-      const delay = this.retryDelay * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryRequest(requestFn, attempt + 1);
-    }
+  transformWeatherData(openEpiResponse, location) {
+    return {
+      location: {
+        lat: location.lat,
+        lon: location.lon,
+        name: openEpiResponse.location?.name || 'Unknown',
+        country: openEpiResponse.location?.country || 'Unknown'
+      },
+      current: {
+        temperature: openEpiResponse.temperature || openEpiResponse.temp,
+        feelsLike: openEpiResponse.feels_like || openEpiResponse.apparent_temperature,
+        humidity: openEpiResponse.humidity || openEpiResponse.relative_humidity,
+        pressure: openEpiResponse.pressure || openEpiResponse.surface_pressure,
+        visibility: openEpiResponse.visibility,
+        windSpeed: openEpiResponse.wind_speed || openEpiResponse.wind?.speed,
+        windDirection: openEpiResponse.wind_direction || openEpiResponse.wind?.direction,
+        cloudiness: openEpiResponse.cloud_cover || openEpiResponse.cloudiness,
+        description: openEpiResponse.weather_description || openEpiResponse.description,
+        icon: openEpiResponse.weather_icon || openEpiResponse.icon,
+        uvIndex: openEpiResponse.uv_index,
+        dewPoint: openEpiResponse.dew_point,
+        precipitation: openEpiResponse.precipitation
+      },
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
+  }
+
+  /**
+   * Transform OpenEPI forecast response to expected format
+   */
+  transformForecastData(openEpiResponse, location) {
+    const forecast = openEpiResponse.forecast || openEpiResponse.daily || [];
+    
+    return {
+      location: {
+        lat: location.lat,
+        lon: location.lon,
+        name: openEpiResponse.location?.name || 'Unknown',
+        country: openEpiResponse.location?.country || 'Unknown'
+      },
+      forecast: forecast.map(day => ({
+        date: day.date || day.datetime,
+        temperature: {
+          min: day.temp_min || day.temperature?.min,
+          max: day.temp_max || day.temperature?.max,
+          avg: day.temp_avg || day.temperature?.avg
+        },
+        humidity: day.humidity || day.relative_humidity,
+        pressure: day.pressure || day.surface_pressure,
+        windSpeed: day.wind_speed || day.wind?.speed,
+        windDirection: day.wind_direction || day.wind?.direction,
+        cloudiness: day.cloud_cover || day.cloudiness,
+        precipitation: day.precipitation || day.precip,
+        precipitationProbability: day.precipitation_probability || day.precip_prob,
+        description: day.weather_description || day.description,
+        icon: day.weather_icon || day.icon,
+        uvIndex: day.uv_index
+      })),
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
   }
 
   /**
@@ -68,107 +94,42 @@ class WeatherApiService {
         throw new ApiError('Latitude and longitude are required', 400);
       }
 
-      const requestFn = () => this.client.get('/weather', {
-        params: { lat, lon }
+      const response = await this.openEpi.getWeatherData(lat, lon, {
+        cacheTTL: this.weatherCacheTTL
       });
-
-      const response = await this.retryRequest(requestFn);
       
-      const weatherData = {
-        location: {
-          lat: response.data.coord.lat,
-          lon: response.data.coord.lon,
-          name: response.data.name,
-          country: response.data.sys.country
-        },
-        current: {
-          temperature: response.data.main.temp,
-          feelsLike: response.data.main.feels_like,
-          humidity: response.data.main.humidity,
-          pressure: response.data.main.pressure,
-          visibility: response.data.visibility,
-          windSpeed: response.data.wind.speed,
-          windDirection: response.data.wind.deg,
-          cloudiness: response.data.clouds.all,
-          description: response.data.weather[0].description,
-          icon: response.data.weather[0].icon
-        },
-        timestamp: new Date().toISOString(),
-        source: 'OpenWeatherMap'
-      };
+      const weatherData = this.transformWeatherData(response, { lat, lon });
 
-      logger.info('Current weather data retrieved successfully', { lat, lon });
+      logger.info('Current weather data retrieved successfully via OpenEPI', { lat, lon });
       return weatherData;
 
     } catch (error) {
-      logger.error('Failed to get current weather', { lat, lon, error: error.message });
-      
-      if (error.response?.status === 401) {
-        throw new ApiError('Invalid weather API key', 401);
-      } else if (error.response?.status === 404) {
-        throw new ApiError('Location not found', 404);
-      }
-      
-      throw new ApiError('Weather service temporarily unavailable', 503);
+      logger.error('Failed to get current weather from OpenEPI', { lat, lon, error: error.message });
+      throw error; // Let OpenEPI service handle error transformation
     }
   }
 
   /**
-   * Get 5-day weather forecast for farming planning
+   * Get 7-day weather forecast for farming planning
    */
-  async getWeatherForecast(lat, lon) {
+  async getWeatherForecast(lat, lon, days = 7) {
     try {
       if (!lat || !lon) {
         throw new ApiError('Latitude and longitude are required', 400);
       }
 
-      const requestFn = () => this.client.get('/forecast', {
-        params: { lat, lon }
+      const response = await this.openEpi.getWeatherForecast(lat, lon, days, {
+        cacheTTL: this.forecastCacheTTL
       });
-
-      const response = await this.retryRequest(requestFn);
       
-      const forecastData = {
-        location: {
-          lat: response.data.city.coord.lat,
-          lon: response.data.city.coord.lon,
-          name: response.data.city.name,
-          country: response.data.city.country
-        },
-        forecast: response.data.list.map(item => ({
-          datetime: item.dt_txt,
-          temperature: {
-            current: item.main.temp,
-            min: item.main.temp_min,
-            max: item.main.temp_max,
-            feelsLike: item.main.feels_like
-          },
-          humidity: item.main.humidity,
-          pressure: item.main.pressure,
-          windSpeed: item.wind.speed,
-          windDirection: item.wind.deg,
-          cloudiness: item.clouds.all,
-          precipitation: item.rain ? item.rain['3h'] || 0 : 0,
-          description: item.weather[0].description,
-          icon: item.weather[0].icon
-        })),
-        timestamp: new Date().toISOString(),
-        source: 'OpenWeatherMap'
-      };
+      const forecastData = this.transformForecastData(response, { lat, lon });
 
-      logger.info('Weather forecast data retrieved successfully', { lat, lon });
+      logger.info('Weather forecast data retrieved successfully via OpenEPI', { lat, lon, days });
       return forecastData;
 
     } catch (error) {
-      logger.error('Failed to get weather forecast', { lat, lon, error: error.message });
-      
-      if (error.response?.status === 401) {
-        throw new ApiError('Invalid weather API key', 401);
-      } else if (error.response?.status === 404) {
-        throw new ApiError('Location not found', 404);
-      }
-      
-      throw new ApiError('Weather forecast service temporarily unavailable', 503);
+      logger.error('Failed to get weather forecast from OpenEPI', { lat, lon, error: error.message });
+      throw error; // Let OpenEPI service handle error transformation
     }
   }
 
@@ -223,6 +184,281 @@ class WeatherApiService {
       logger.error('Failed to get weather alerts', { lat, lon, error: error.message });
       throw new ApiError('Weather alerts service temporarily unavailable', 503);
     }
+  }
+
+  /**
+   * Get historical weather data for analysis
+   */
+  async getHistoricalWeather(lat, lon, startDate, endDate) {
+    try {
+      if (!lat || !lon || !startDate || !endDate) {
+        throw new ApiError('Latitude, longitude, start date, and end date are required', 400);
+      }
+
+      const response = await this.openEpi.getHistoricalWeather(lat, lon, startDate, endDate, {
+        cacheTTL: this.historicalCacheTTL
+      });
+
+      logger.info('Historical weather data retrieved successfully via OpenEPI', { 
+        lat, lon, startDate, endDate 
+      });
+      
+      return {
+        location: { lat, lon },
+        period: { startDate, endDate },
+        data: response.historical || response.data || [],
+        timestamp: new Date().toISOString(),
+        source: 'OpenEPI'
+      };
+
+    } catch (error) {
+      logger.error('Failed to get historical weather from OpenEPI', { 
+        lat, lon, startDate, endDate, error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get agricultural weather insights and recommendations
+   */
+  async getAgriculturalInsights(lat, lon, cropType) {
+    try {
+      if (!lat || !lon) {
+        throw new ApiError('Latitude and longitude are required', 400);
+      }
+
+      const [currentWeather, forecast] = await Promise.all([
+        this.getCurrentWeather(lat, lon),
+        this.getWeatherForecast(lat, lon, 7)
+      ]);
+
+      // Generate agricultural insights
+      const insights = {
+        irrigation: this.generateIrrigationInsights(currentWeather, forecast),
+        planting: this.generatePlantingInsights(currentWeather, forecast, cropType),
+        harvesting: this.generateHarvestingInsights(currentWeather, forecast),
+        pestManagement: this.generatePestManagementInsights(currentWeather, forecast)
+      };
+
+      return {
+        location: currentWeather.location,
+        cropType,
+        insights,
+        timestamp: new Date().toISOString(),
+        source: 'OpenEPI'
+      };
+
+    } catch (error) {
+      logger.error('Failed to generate agricultural insights', { 
+        lat, lon, cropType, error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Generate irrigation recommendations based on weather data
+   */
+  generateIrrigationInsights(currentWeather, forecast) {
+    const current = currentWeather.current;
+    const upcoming = forecast.forecast.slice(0, 3); // Next 3 days
+    
+    let recommendation = 'normal';
+    let reasoning = [];
+    
+    // Check current conditions
+    if (current.temperature > 30 && current.humidity < 50) {
+      recommendation = 'increase';
+      reasoning.push('High temperature and low humidity increase water loss');
+    }
+    
+    if (current.precipitation > 5) {
+      recommendation = 'reduce';
+      reasoning.push('Recent rainfall reduces irrigation needs');
+    }
+    
+    // Check forecast
+    const upcomingRain = upcoming.some(day => day.precipitation > 2);
+    if (upcomingRain && recommendation !== 'reduce') {
+      recommendation = 'delay';
+      reasoning.push('Rain expected in next 3 days');
+    }
+    
+    return {
+      recommendation,
+      reasoning,
+      currentSoilMoisture: this.estimateSoilMoisture(current),
+      nextIrrigation: this.calculateNextIrrigation(recommendation)
+    };
+  }
+
+  /**
+   * Generate planting recommendations
+   */
+  generatePlantingInsights(currentWeather, forecast, cropType) {
+    const avgTemp = forecast.forecast
+      .slice(0, 7)
+      .reduce((sum, day) => sum + (day.temperature.avg || day.temperature.max), 0) / 7;
+    
+    const suitability = this.assessPlantingSuitability(avgTemp, currentWeather.current, cropType);
+    
+    return {
+      suitability,
+      optimalWindow: this.calculateOptimalPlantingWindow(forecast, cropType),
+      recommendations: this.getPlantingRecommendations(suitability, cropType)
+    };
+  }
+
+  /**
+   * Generate harvesting insights
+   */
+  generateHarvestingInsights(currentWeather, forecast) {
+    const dryDays = forecast.forecast.filter(day => day.precipitation < 1).length;
+    const windyDays = forecast.forecast.filter(day => day.windSpeed > 15).length;
+    
+    return {
+      conditions: dryDays >= 3 ? 'favorable' : 'challenging',
+      optimalDays: forecast.forecast
+        .filter(day => day.precipitation < 1 && day.windSpeed < 15)
+        .map(day => day.date),
+      recommendations: this.getHarvestingRecommendations(dryDays, windyDays)
+    };
+  }
+
+  /**
+   * Generate pest management insights
+   */
+  generatePestManagementInsights(currentWeather, forecast) {
+    const current = currentWeather.current;
+    const highHumidityDays = forecast.forecast.filter(day => day.humidity > 80).length;
+    
+    let riskLevel = 'low';
+    let recommendations = [];
+    
+    if (current.temperature > 25 && current.humidity > 75) {
+      riskLevel = 'high';
+      recommendations.push('Monitor for fungal diseases');
+      recommendations.push('Improve air circulation around plants');
+    }
+    
+    if (highHumidityDays > 3) {
+      riskLevel = Math.max(riskLevel, 'moderate');
+      recommendations.push('Consider preventive fungicide application');
+    }
+    
+    return {
+      riskLevel,
+      primaryConcerns: this.identifyPestConcerns(current, forecast),
+      recommendations,
+      optimalSprayingDays: forecast.forecast
+        .filter(day => day.windSpeed < 10 && day.precipitation < 1)
+        .map(day => day.date)
+    };
+  }
+
+  // Helper methods for agricultural insights
+  estimateSoilMoisture(weather) {
+    // Simplified soil moisture estimation
+    let moisture = 50; // Base percentage
+    
+    if (weather.precipitation > 10) moisture += 30;
+    else if (weather.precipitation > 5) moisture += 15;
+    
+    if (weather.temperature > 30) moisture -= 20;
+    if (weather.humidity < 50) moisture -= 10;
+    
+    return Math.max(0, Math.min(100, moisture));
+  }
+
+  calculateNextIrrigation(recommendation) {
+    const now = new Date();
+    const hours = {
+      'immediate': 0,
+      'increase': 12,
+      'normal': 24,
+      'reduce': 48,
+      'delay': 72
+    };
+    
+    return new Date(now.getTime() + (hours[recommendation] || 24) * 60 * 60 * 1000);
+  }
+
+  assessPlantingSuitability(avgTemp, current, cropType) {
+    // Simplified crop-specific temperature requirements
+    const tempRanges = {
+      tomato: { min: 18, max: 30 },
+      corn: { min: 15, max: 35 },
+      wheat: { min: 10, max: 25 },
+      rice: { min: 20, max: 35 },
+      default: { min: 15, max: 30 }
+    };
+    
+    const range = tempRanges[cropType] || tempRanges.default;
+    
+    if (avgTemp >= range.min && avgTemp <= range.max) {
+      return 'excellent';
+    } else if (avgTemp >= range.min - 5 && avgTemp <= range.max + 5) {
+      return 'good';
+    } else {
+      return 'poor';
+    }
+  }
+
+  calculateOptimalPlantingWindow(forecast, cropType) {
+    // Return next 7 days with stable temperature conditions
+    return forecast.forecast
+      .filter(day => {
+        const temp = day.temperature.avg || day.temperature.max;
+        return temp > 15 && temp < 35 && day.precipitation < 5;
+      })
+      .map(day => day.date)
+      .slice(0, 3);
+  }
+
+  getPlantingRecommendations(suitability, cropType) {
+    const baseRecommendations = {
+      excellent: [`Excellent conditions for ${cropType} planting`, 'Prepare soil and seeds'],
+      good: [`Good conditions for ${cropType} planting`, 'Monitor weather for any changes'],
+      poor: [`Not ideal for ${cropType} planting`, 'Wait for better conditions']
+    };
+    
+    return baseRecommendations[suitability] || baseRecommendations.good;
+  }
+
+  getHarvestingRecommendations(dryDays, windyDays) {
+    const recommendations = [];
+    
+    if (dryDays >= 3) {
+      recommendations.push('Good weather window for harvesting');
+    } else {
+      recommendations.push('Wait for drier conditions');
+    }
+    
+    if (windyDays > 2) {
+      recommendations.push('Be cautious of strong winds during harvest');
+    }
+    
+    return recommendations;
+  }
+
+  identifyPestConcerns(current, forecast) {
+    const concerns = [];
+    
+    if (current.temperature > 25 && current.humidity > 75) {
+      concerns.push('Fungal disease risk');
+    }
+    
+    if (current.temperature > 30) {
+      concerns.push('Insect activity increase');
+    }
+    
+    const wetDays = forecast.forecast.filter(day => day.precipitation > 5).length;
+    if (wetDays > 3) {
+      concerns.push('Root rot and soil-borne diseases');
+    }
+    
+    return concerns;
   }
 }
 

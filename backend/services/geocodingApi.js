@@ -1,54 +1,127 @@
 /**
  * Geocoding API Service for AgriSphere
- * Provides location services, address validation, and geographic data
- * Essential for farm location mapping and regional agricultural data
+ * Provides location services, address validation, and geographic data through OpenEPI
+ * Refactored to use centralized OpenEPI service
  */
 
-const axios = require('axios');
+const openEpiService = require('./openEpiService');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 
 class GeocodingApiService {
   constructor() {
-    this.mapboxBaseURL = process.env.GEOCODING_API_URL || 'https://api.mapbox.com/geocoding/v5';
-    this.apiKey = process.env.GEOCODING_API_KEY;
-    this.retryAttempts = 3;
-    this.retryDelay = 2000;
+    this.openEpi = openEpiService;
     
-    // Create axios instance with default config
-    this.client = axios.create({
-      timeout: 15000, // 15 seconds timeout
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
+    // Geocoding cache duration (addresses don't change frequently)
+    this.addressCacheTTL = 86400; // 24 hours
+    this.reverseGeocodeCacheTTL = 43200; // 12 hours
+    this.adminInfoCacheTTL = 604800; // 7 days
   }
 
   /**
-   * Retry mechanism for failed requests
+   * Transform OpenEPI geocoding response to expected format
    */
-  async retryRequest(requestFn, attempt = 1) {
-    try {
-      return await requestFn();
-    } catch (error) {
-      if (attempt >= this.retryAttempts) {
-        throw error;
-      }
-      
-      logger.warn(`Geocoding API request failed (attempt ${attempt}/${this.retryAttempts}). Retrying...`, {
-        error: error.message,
-        attempt
-      });
-      
-      const delay = this.retryDelay * Math.pow(2, attempt - 1);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryRequest(requestFn, attempt + 1);
-    }
+  transformGeocodingResponse(openEpiResponse, query) {
+    const features = openEpiResponse.features || openEpiResponse.results || [];
+    
+    const results = features.map(feature => ({
+      formattedAddress: feature.formatted_address || feature.display_name || feature.address,
+      coordinates: {
+        longitude: feature.coordinates?.[0] || feature.lng || feature.lon,
+        latitude: feature.coordinates?.[1] || feature.lat
+      },
+      components: this.parseOpenEpiComponents(feature),
+      confidence: feature.confidence || feature.accuracy || 0.8,
+      bounds: feature.bounds || feature.bbox ? this.transformBounds(feature.bounds || feature.bbox) : null,
+      placeType: feature.type || feature.place_type || 'unknown',
+      relevance: feature.relevance || feature.score || 1.0
+    }));
+
+    return {
+      query,
+      results,
+      resultCount: results.length,
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
   }
 
   /**
-   * Convert address to coordinates (geocoding)
+   * Transform OpenEPI reverse geocoding response
+   */
+  transformReverseGeocodingResponse(openEpiResponse, lat, lon) {
+    const feature = openEpiResponse.address || openEpiResponse.result || openEpiResponse;
+    
+    return {
+      coordinates: { latitude: lat, longitude: lon },
+      address: {
+        formatted: feature.formatted_address || feature.display_name || feature.address,
+        components: this.parseOpenEpiComponents(feature),
+        confidence: feature.confidence || feature.accuracy || 0.8,
+        placeType: feature.type || feature.place_type || 'address'
+      },
+      administrativeInfo: this.extractOpenEpiAdministrativeInfo(feature),
+      timestamp: new Date().toISOString(),
+      source: 'OpenEPI'
+    };
+  }
+
+  /**
+   * Parse OpenEPI address components
+   */
+  parseOpenEpiComponents(feature) {
+    const components = feature.components || feature.address_components || {};
+    
+    return {
+      street: components.street || components.road || components.street_name || null,
+      streetNumber: components.house_number || components.street_number || null,
+      neighborhood: components.neighbourhood || components.neighborhood || null,
+      locality: components.city || components.locality || components.town || components.village || null,
+      region: components.state || components.region || components.province || null,
+      country: components.country || components.country_name || null,
+      countryCode: components.country_code || components.country_iso || null,
+      postalCode: components.postcode || components.postal_code || components.zip || null
+    };
+  }
+
+  /**
+   * Transform bounds data
+   */
+  transformBounds(bounds) {
+    if (Array.isArray(bounds) && bounds.length === 4) {
+      // [west, south, east, north] format
+      return {
+        southwest: { lat: bounds[1], lng: bounds[0] },
+        northeast: { lat: bounds[3], lng: bounds[2] }
+      };
+    }
+    
+    if (bounds.southwest && bounds.northeast) {
+      return bounds;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extract administrative information from OpenEPI response
+   */
+  extractOpenEpiAdministrativeInfo(feature) {
+    const components = feature.components || feature.administrative || {};
+    
+    return {
+      country: components.country || null,
+      countryCode: components.country_code || null,
+      region: components.region || components.state || null,
+      district: components.district || components.county || null,
+      locality: components.locality || components.city || null,
+      timezone: feature.timezone || null,
+      elevation: feature.elevation || null
+    };
+  }
+
+  /**
+   * Convert address to coordinates (geocoding) using OpenEPI
    */
   async geocodeAddress(address, countryCode = null) {
     try {
@@ -56,63 +129,40 @@ class GeocodingApiService {
         throw new ApiError('Address is required', 400);
       }
 
-      const encodedAddress = encodeURIComponent(address.trim());
-      const countryFilter = countryCode ? `&country=${countryCode}` : '';
+      const response = await this.openEpi.geocodeAddress(address.trim(), {
+        cacheTTL: this.addressCacheTTL
+      });
       
-      const requestFn = () => this.client.get(
-        `${this.mapboxBaseURL}/mapbox.places/${encodedAddress}.json?access_token=${this.apiKey}&limit=5${countryFilter}`
-      );
-
-      const response = await this.retryRequest(requestFn);
-      
-      if (!response.data.features || response.data.features.length === 0) {
+      if (!response || (!response.features && !response.results)) {
         throw new ApiError('No locations found for the provided address', 404);
       }
 
-      const results = response.data.features.map(feature => ({
-        formattedAddress: feature.place_name,
-        coordinates: {
-          longitude: feature.center[0],
-          latitude: feature.center[1]
-        },
-        components: this.parseAddressComponents(feature),
-        confidence: this.calculateConfidence(feature),
-        bounds: feature.bbox ? {
-          southwest: { lat: feature.bbox[1], lng: feature.bbox[0] },
-          northeast: { lat: feature.bbox[3], lng: feature.bbox[2] }
-        } : null,
-        placeType: feature.place_type[0],
-        relevance: feature.relevance
-      }));
+      const geocodingResult = this.transformGeocodingResponse(response, address);
 
-      const geocodingResult = {
-        query: address,
-        results,
-        resultCount: results.length,
-        timestamp: new Date().toISOString(),
-        source: 'Mapbox'
-      };
-
-      logger.info('Address geocoding completed', { address, resultCount: results.length });
+      logger.info('Address geocoding completed via OpenEPI', { address, resultCount: geocodingResult.resultCount });
       return geocodingResult;
 
     } catch (error) {
-      logger.error('Failed to geocode address', { address, error: error.message });
-      
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      
-      if (error.response?.status === 401) {
-        throw new ApiError('Invalid geocoding API key', 401);
-      }
-      
-      throw new ApiError('Geocoding service temporarily unavailable', 503);
+      logger.error('Failed to geocode address via OpenEPI', { address, error: error.message });
+      throw error; // Let OpenEPI service handle error transformation
     }
   }
 
   /**
-   * Convert coordinates to address (reverse geocoding)
+   * Get coordinates for an address (alias for geocodeAddress)
+   */
+  async getCoordinates(address, countryCode = null) {
+    const result = await this.geocodeAddress(address, countryCode);
+    
+    if (result.results && result.results.length > 0) {
+      return result.results[0].coordinates;
+    }
+    
+    throw new ApiError('No coordinates found for the provided address', 404);
+  }
+
+  /**
+   * Convert coordinates to address (reverse geocoding) using OpenEPI
    */
   async reverseGeocode(lat, lon) {
     try {
@@ -124,46 +174,82 @@ class GeocodingApiService {
         throw new ApiError('Invalid coordinates provided', 400);
       }
 
-      const requestFn = () => this.client.get(
-        `${this.mapboxBaseURL}/mapbox.places/${lon},${lat}.json?access_token=${this.apiKey}&types=address,place`
-      );
-
-      const response = await this.retryRequest(requestFn);
+      const response = await this.openEpi.reverseGeocode(lat, lon, {
+        cacheTTL: this.reverseGeocodeCacheTTL
+      });
       
-      if (!response.data.features || response.data.features.length === 0) {
+      if (!response) {
         throw new ApiError('No address found for the provided coordinates', 404);
       }
 
-      const feature = response.data.features[0];
-      
-      const reverseGeocodingResult = {
-        coordinates: { latitude: lat, longitude: lon },
-        address: {
-          formatted: feature.place_name,
-          components: this.parseAddressComponents(feature),
-          confidence: this.calculateConfidence(feature),
-          placeType: feature.place_type[0]
-        },
-        administrativeInfo: this.extractAdministrativeInfo(response.data.features),
-        timestamp: new Date().toISOString(),
-        source: 'Mapbox'
-      };
+      const reverseGeocodingResult = this.transformReverseGeocodingResponse(response, lat, lon);
 
-      logger.info('Reverse geocoding completed', { lat, lon });
+      logger.info('Reverse geocoding completed via OpenEPI', { lat, lon });
       return reverseGeocodingResult;
 
     } catch (error) {
-      logger.error('Failed to reverse geocode coordinates', { lat, lon, error: error.message });
-      
-      if (error instanceof ApiError) {
-        throw error;
+      logger.error('Failed to reverse geocode coordinates via OpenEPI', { lat, lon, error: error.message });
+      throw error; // Let OpenEPI service handle error transformation
+    }
+  }
+
+  /**
+   * Get administrative information for coordinates using OpenEPI
+   */
+  async getAdministrativeInfo(lat, lon) {
+    try {
+      if (!lat || !lon) {
+        throw new ApiError('Latitude and longitude are required', 400);
       }
+
+      const response = await this.openEpi.getAdministrativeInfo(lat, lon, {
+        cacheTTL: this.adminInfoCacheTTL
+      });
+
+      const adminInfo = this.extractOpenEpiAdministrativeInfo(response);
+
+      logger.info('Administrative information retrieved via OpenEPI', { lat, lon });
+      return {
+        coordinates: { latitude: lat, longitude: lon },
+        ...adminInfo,
+        timestamp: new Date().toISOString(),
+        source: 'OpenEPI'
+      };
+
+    } catch (error) {
+      logger.error('Failed to get administrative info via OpenEPI', { lat, lon, error: error.message });
+      throw error;
       
       if (error.response?.status === 401) {
         throw new ApiError('Invalid geocoding API key', 401);
       }
       
       throw new ApiError('Reverse geocoding service temporarily unavailable', 503);
+    }
+  }
+
+  /**
+   * Get coordinates from address (forward geocoding)
+   */
+  async getCoordinates(address) {
+    try {
+      if (!address || address.trim().length === 0) {
+        throw new ApiError('Address is required', 400);
+      }
+
+      const geocodingResult = await this.geocodeAddress(address);
+      
+      if (!geocodingResult.results || geocodingResult.results.length === 0) {
+        throw new ApiError('No coordinates found for the provided address', 404);
+      }
+
+      // Return the coordinates of the best match
+      const bestMatch = geocodingResult.results[0];
+      return [bestMatch.coordinates.longitude, bestMatch.coordinates.latitude];
+
+    } catch (error) {
+      logger.error('Failed to get coordinates from address', { address, error: error.message });
+      throw error;
     }
   }
 
