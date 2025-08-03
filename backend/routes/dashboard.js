@@ -37,16 +37,91 @@ router.get('/overview', authenticateUser, asyncHandler(async (req, res) => {
       });
     }
 
-    const { latitude, longitude } = primaryFarm.location.centerPoint.coordinates;
-    const [lat, lon] = [latitude, longitude];
+    // Check if farm has coordinates, otherwise use user's location
+    let lat, lon;
+    if (!primaryFarm.location.centerPoint || !primaryFarm.location.centerPoint.coordinates) {
+      logger.warn('Farm missing coordinates, using user location', { farmId: primaryFarm._id });
+      // Use user's location coordinates from onboarding
+      const user = await User.findById(userId);
+      logger.info('User data for coordinates', { 
+        userId, 
+        hasUser: !!user, 
+        hasLocation: !!(user && user.location),
+        hasCoordinates: !!(user && user.location && user.location.coordinates),
+        coordinates: user?.location?.coordinates
+      });
+      
+      if (user && user.location && user.location.coordinates) {
+        const [userLon, userLat] = user.location.coordinates;
+        lat = userLat;
+        lon = userLon;
+        logger.info('Using user location coordinates', { lat, lon });
+      } else {
+        // Use a default location (Delhi, India) if coordinates are missing
+        lat = 28.7041;
+        lon = 77.1025;
+        logger.warn('No user coordinates found, using default location');
+      }
+    } else {
+      // Coordinates are stored as [longitude, latitude] in GeoJSON format
+      const [longitude, latitude] = primaryFarm.location.centerPoint.coordinates;
+      lat = latitude;
+      lon = longitude;
+    }
+
+    // Log coordinates for debugging
+    logger.info('Using coordinates for weather data', { lat, lon, farmId: primaryFarm._id });
 
     // Fetch data in parallel for better performance
-    const [weatherData, agriculturalInsights, tasksSummary, progressData] = await Promise.all([
-      getWeatherSummary(lat, lon),
-      getAgriculturalInsights(primaryFarm),
-      getTasksSummary(primaryFarm),
-      getProgressData(primaryFarm)
-    ]);
+    logger.info('Starting to fetch dashboard data', { lat, lon });
+    
+    // Fetch data individually to isolate the issue
+    logger.info('Starting to fetch dashboard data', { lat, lon });
+    
+    let weatherData, agriculturalInsights, tasksSummary, progressData;
+    
+    try {
+      weatherData = await getWeatherSummary(lat, lon);
+      logger.info('Weather data fetched successfully');
+    } catch (error) {
+      logger.error('Weather data fetch failed', { error: error.message });
+      weatherData = {
+        current: { temperature: '--', description: 'Weather unavailable' },
+        forecast: [],
+        alerts: []
+      };
+    }
+    
+    try {
+      agriculturalInsights = await getAgriculturalInsights(primaryFarm);
+      logger.info('Agricultural insights fetched successfully');
+    } catch (error) {
+      logger.error('Agricultural insights fetch failed', { error: error.message });
+      agriculturalInsights = [];
+    }
+    
+    try {
+      tasksSummary = await getTasksSummary(primaryFarm);
+      logger.info('Tasks summary fetched successfully');
+    } catch (error) {
+      logger.error('Tasks summary fetch failed', { error: error.message });
+      tasksSummary = { urgent: [], recommended: [], completed: 0, total: 0 };
+    }
+    
+    try {
+      progressData = await getProgressData(primaryFarm);
+      logger.info('Progress data fetched successfully');
+    } catch (error) {
+      logger.error('Progress data fetch failed', { error: error.message });
+      progressData = { cropGrowth: [], farmHealth: 0, sustainabilityScore: 0, weeklyGoals: { completed: 0, total: 0, percentage: 0 } };
+    }
+    
+    logger.info('Dashboard data fetched successfully', { 
+      weatherData: !!weatherData,
+      agriculturalInsights: agriculturalInsights?.length,
+      tasksSummary: !!tasksSummary,
+      progressData: !!progressData
+    });
 
     const dashboardData = {
       hasActiveFarm: true,
@@ -56,7 +131,13 @@ router.get('/overview', authenticateUser, asyncHandler(async (req, res) => {
         location: primaryFarm.location.address,
         area: primaryFarm.farmInfo.totalArea
       },
-      weather: weatherData,
+      weather: {
+        ...weatherData,
+        location: weatherData.location || {
+          name: `${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+          country: 'Coordinates'
+        }
+      },
       insights: agriculturalInsights,
       tasks: tasksSummary,
       progress: progressData,
@@ -88,8 +169,19 @@ router.get('/weather', authenticateUser, asyncHandler(async (req, res) => {
       return error(res, 'No farm found. Please complete farm setup first.', 404);
     }
 
-    const { latitude, longitude } = primaryFarm.location.centerPoint.coordinates;
-    const [lat, lon] = [latitude, longitude];
+    // Check if farm has coordinates
+    let lat, lon;
+    if (!primaryFarm.location.centerPoint || !primaryFarm.location.centerPoint.coordinates) {
+      logger.warn('Farm missing coordinates, using default location', { farmId: primaryFarm._id });
+      // Use a default location (Delhi, India) if coordinates are missing
+      lat = 28.7041;
+      lon = 77.1025;
+    } else {
+      // Coordinates are stored as [longitude, latitude] in GeoJSON format
+      const [longitude, latitude] = primaryFarm.location.centerPoint.coordinates;
+      lat = latitude;
+      lon = longitude;
+    }
 
     const [currentWeather, forecast, agriculturalInsights] = await Promise.all([
       weatherApi.getCurrentWeather(lat, lon),
@@ -97,8 +189,24 @@ router.get('/weather', authenticateUser, asyncHandler(async (req, res) => {
       weatherApi.getAgriculturalInsights(lat, lon, primaryFarm.currentCrops[0]?.cropName)
     ]);
 
+    // Format location name with coordinates
+    const locationName = currentWeather.location?.name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    const coordinates = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    const formattedLocationName = `${locationName} ${coordinates}`;
+    
+    // Update the location name with coordinates
+    const updatedCurrentWeather = {
+      ...currentWeather,
+      location: {
+        ...currentWeather.location,
+        name: formattedLocationName,
+        lat: lat,
+        lon: lon
+      }
+    };
+
     const weatherWidget = {
-      current: currentWeather,
+      current: updatedCurrentWeather,
       forecast: forecast.forecast.slice(0, 5),
       insights: agriculturalInsights.insights,
       alerts: generateWeatherAlerts(currentWeather, forecast),
@@ -179,12 +287,37 @@ router.post('/task/:taskId/complete', authenticateUser, asyncHandler(async (req,
  */
 async function getWeatherSummary(lat, lon) {
   try {
+    logger.info('Fetching weather data', { lat, lon });
+    
     const [current, forecast] = await Promise.all([
       weatherApi.getCurrentWeather(lat, lon),
       weatherApi.getWeatherForecast(lat, lon, 3)
     ]);
 
+    logger.info('Weather data received', { 
+      current: current.current?.temperature,
+      forecast: forecast.forecast?.length 
+    });
+
+    logger.info('Weather data structure', { 
+      current: current.current?.temperature,
+      forecast: forecast.forecast?.length,
+      currentKeys: Object.keys(current.current || {}),
+      forecastKeys: Object.keys(forecast.forecast?.[0] || {})
+    });
+
+    // Format location name with coordinates
+    const locationName = current.location?.name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    const coordinates = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    const formattedLocationName = `${locationName} ${coordinates}`;
+    
     return {
+      location: {
+        ...current.location,
+        name: formattedLocationName,
+        lat: lat,
+        lon: lon
+      },
       current: {
         temperature: Math.round(current.current.temperature),
         description: current.current.description,
@@ -204,8 +337,18 @@ async function getWeatherSummary(lat, lon) {
       alerts: generateWeatherAlerts(current, forecast)
     };
   } catch (error) {
-    logger.warn('Failed to fetch weather summary', { error: error.message });
+    logger.warn('Failed to fetch weather summary', { error: error.message, stack: error.stack });
+    // Format location name with coordinates for error case
+    const coordinates = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    const formattedLocationName = `${lat.toFixed(4)}, ${lon.toFixed(4)} ${coordinates}`;
+    
     return {
+      location: {
+        name: formattedLocationName,
+        country: 'Coordinates',
+        lat: lat,
+        lon: lon
+      },
       current: { temperature: '--', description: 'Weather unavailable' },
       forecast: [],
       alerts: []
@@ -338,7 +481,8 @@ async function getProgressData(farm) {
 function generateWeatherAlerts(current, forecast) {
   const alerts = [];
 
-  if (current.current.temperature > 35) {
+  // Check if weather data exists before accessing properties
+  if (current?.current?.temperature > 35) {
     alerts.push({
       type: 'heat_warning',
       title: 'High Temperature Alert',
@@ -348,7 +492,7 @@ function generateWeatherAlerts(current, forecast) {
     });
   }
 
-  if (forecast.forecast.some(day => day.precipitationProbability > 70)) {
+  if (forecast?.forecast?.some(day => day.precipitationProbability > 70)) {
     alerts.push({
       type: 'rain_forecast',
       title: 'Rain Expected',

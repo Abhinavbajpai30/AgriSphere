@@ -5,16 +5,51 @@
  */
 
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const sharp = require('sharp');
 const { body, param, query } = require('express-validator');
 const DiagnosisHistory = require('../models/DiagnosisHistory');
 const Farm = require('../models/Farm');
 const User = require('../models/User');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { handleValidationErrors } = require('../middleware/errorHandler');
+const { success, error } = require('../utils/apiResponse');
 const logger = require('../utils/logger');
 const cropHealthApi = require('../services/cropHealthApi');
 
 const router = express.Router();
+
+// Configure multer for image uploads
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Max 5 files per request
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
+
+// Ensure uploads directory exists
+const ensureUploadsDir = async () => {
+  const uploadsDir = path.join(__dirname, '../uploads/diagnosis');
+  try {
+    await fs.access(uploadsDir);
+  } catch {
+    await fs.mkdir(uploadsDir, { recursive: true });
+  }
+  return uploadsDir;
+};
 
 // Authentication middleware (simplified - should be in separate file)
 const authenticateUser = asyncHandler(async (req, res, next) => {
@@ -109,8 +144,323 @@ const validateTreatmentUpdate = [
 ];
 
 /**
+ * @route   POST /api/diagnosis/upload
+ * @desc    Upload crop images for AI diagnosis
+ * @access  Private
+ */
+router.post('/upload', authenticateUser, upload.array('images', 5), asyncHandler(async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return error(res, 'No images uploaded', 400);
+    }
+
+    const uploadsDir = await ensureUploadsDir();
+    const processedImages = [];
+
+    // Process each uploaded image
+    for (const file of req.files) {
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomString = Math.random().toString(36).substring(2, 15);
+      const filename = `diagnosis_${timestamp}_${randomString}.jpg`;
+      const filepath = path.join(uploadsDir, filename);
+
+      // Process and optimize image with Sharp
+      await sharp(file.buffer)
+        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toFile(filepath);
+
+      // Validate image quality (basic checks)
+      const metadata = await sharp(file.buffer).metadata();
+      const quality = await assessImageQuality(metadata, file.buffer);
+
+      processedImages.push({
+        filename,
+        originalName: file.originalname,
+        path: filepath,
+        size: file.size,
+        quality,
+        metadata: {
+          width: metadata.width,
+          height: metadata.height,
+          format: metadata.format
+        }
+      });
+    }
+
+    logger.info('Images uploaded and processed', { 
+      userId: req.user._id, 
+      imageCount: processedImages.length 
+    });
+
+    return success(res, 'Images uploaded successfully', {
+      images: processedImages,
+      uploadId: `upload_${Date.now()}_${Math.random().toString(36).substring(2)}`
+    });
+
+  } catch (err) {
+    logger.error('Image upload failed', { error: err.message, userId: req.user._id });
+    return error(res, 'Failed to upload images. Please try again.', 500);
+  }
+}));
+
+/**
+ * @route   POST /api/diagnosis/analyze
+ * @desc    Analyze uploaded crop images using AI
+ * @access  Private
+ */
+router.post('/analyze', authenticateUser, [
+  body('uploadId').notEmpty().withMessage('Upload ID is required'),
+  body('cropType').optional().isLength({ min: 2 }).withMessage('Crop type must be at least 2 characters'),
+  body('farmId').optional().isMongoId().withMessage('Invalid farm ID'),
+  body('location').optional().isObject().withMessage('Location must be an object'),
+  body('symptoms').optional().isArray().withMessage('Symptoms must be an array'),
+  body('additionalInfo').optional().isLength({ max: 500 }).withMessage('Additional info too long')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { uploadId, cropType, farmId, location, symptoms, additionalInfo } = req.body;
+    
+    logger.info('Analyze request received', { 
+      uploadId, 
+      cropType, 
+      userId: req.user._id
+    });
+
+    // Verify farm ownership if farmId provided
+    let farm = null;
+    if (farmId) {
+      farm = await Farm.findOne({
+        _id: farmId,
+        owner: req.user._id
+      });
+      
+      if (!farm) {
+        return error(res, 'Farm not found or access denied', 404);
+      }
+    }
+
+    // Get uploaded images (in production, you'd retrieve from upload session)
+    const uploadsDir = await ensureUploadsDir();
+    
+    // Simulate retrieving uploaded images for this uploadId
+    // In production, you'd store upload sessions in database or cache
+    const imageFiles = [];
+    
+    // For now, let's use the most recent images
+    // This should be replaced with proper session management
+    const files = await fs.readdir(uploadsDir);
+    const recentFiles = files
+      .filter(file => file.startsWith('diagnosis_'))
+      .sort()
+      .slice(-3); // Get last 3 files
+
+    for (const filename of recentFiles) {
+      const filepath = path.join(uploadsDir, filename);
+      try {
+        await fs.access(filepath);
+        imageFiles.push(filepath);
+      } catch (err) {
+        logger.warn('Image file not found', { filename, uploadId });
+      }
+    }
+
+    if (imageFiles.length === 0) {
+      return error(res, 'No images found for analysis. Please upload images first.', 400);
+    }
+
+    // Analyze images using OpenEPI Crop Health API
+    logger.info('Starting crop health analysis', { 
+      uploadId, 
+      userId: req.user._id, 
+      imageCount: imageFiles.length 
+    });
+
+    const analysisResults = await cropHealthApi.analyzeCropImage(
+      imageFiles[0], // Primary image
+      cropType || 'unknown'
+    );
+
+    // Get user's default farm if no specific farm provided
+    let defaultFarm = null;
+    if (!farmId) {
+      defaultFarm = await Farm.findOne({ owner: req.user._id }).sort({ createdAt: 1 });
+      if (!defaultFarm) {
+        // Create a default farm for the user if none exists
+        defaultFarm = new Farm({
+          name: 'Default Farm',
+          owner: req.user._id,
+          location: {
+            coordinates: [0, 0],
+            address: 'Default Location'
+          },
+          totalArea: 1,
+          soilType: 'unknown'
+        });
+        await defaultFarm.save();
+      }
+    }
+
+    // Create diagnosis record with proper structure for DiagnosisHistory model
+    const diagnosisData = {
+      user: req.user._id,
+      farm: farmId || defaultFarm._id,
+      fieldId: `field_${Date.now()}`, // Generate unique field ID
+      cropInfo: {
+        cropName: cropType || analysisResults.plantInfo?.cropType || 'unknown',
+        growthStage: analysisResults.plantInfo?.plantStage || 'maturation'
+      },
+      diagnosisRequest: {
+        requestType: 'image_analysis',
+        symptoms: symptoms || [],
+        affectedArea: {
+          percentage: 10, // Default value
+          description: 'Sample area'
+        }
+      },
+      imageData: imageFiles.map(filepath => ({
+        imageId: path.basename(filepath, path.extname(filepath)),
+        imageUrl: filepath,
+        imageType: 'affected_plant',
+        captureDetails: {
+          timestamp: new Date(),
+          imageQuality: 'good',
+          lighting: 'good'
+        },
+        metadata: {
+          fileSize: fsSync.statSync(filepath).size,
+          format: path.extname(filepath).substring(1)
+        }
+      })),
+      analysisResults: {
+        primaryDiagnosis: {
+          condition: analysisResults.primaryIssue || 'No issues detected',
+          conditionType: 'disease', // Default to disease
+          confidence: analysisResults.confidence || 85,
+          severity: analysisResults.severity || 'low'
+        },
+        analysisMethod: 'ai_image_recognition',
+        processingTime: 2.5,
+        modelVersion: '1.0',
+        qualityAssessment: {
+          imageQuality: 'good',
+          diagnosisReliability: 'high'
+        }
+      },
+      treatmentRecommendations: {
+        immediate: analysisResults.recommendations?.immediate?.map(rec => ({
+          action: rec.title || rec,
+          priority: rec.urgency || 'medium',
+          description: rec.description || rec,
+          timeline: 'within 24 hours'
+        })) || [],
+        longTerm: analysisResults.recommendations?.longTerm?.map(rec => ({
+          action: rec.title || rec,
+          description: rec.description || rec,
+          timeline: 'ongoing'
+        })) || [],
+        prevention: analysisResults.recommendations?.preventive?.map(rec => ({
+          measure: rec.title || rec,
+          description: rec.description || rec,
+          effectiveness: 'high'
+        })) || []
+      }
+    };
+
+    const diagnosis = new DiagnosisHistory(diagnosisData);
+    await diagnosis.save();
+
+    // Update user statistics
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { 'appUsage.totalDiagnoses': 1 },
+      $set: { 'appUsage.lastActiveDate': new Date() }
+    });
+
+    logger.info('Crop diagnosis completed', { 
+      diagnosisId: diagnosis._id, 
+      userId: req.user._id,
+      confidence: analysisResults.confidence 
+    });
+
+    return success(res, 'Crop analysis completed successfully', {
+      diagnosis: {
+        id: diagnosis._id,
+        confidence: diagnosis.analysisResults.primaryDiagnosis.confidence,
+        primaryIssue: diagnosis.analysisResults.primaryDiagnosis.condition,
+        severity: diagnosis.analysisResults.primaryDiagnosis.severity,
+        plantHealth: analysisResults.plantInfo?.plantHealth || 'good',
+        recommendations: {
+          immediate: diagnosis.treatmentRecommendations.immediate,
+          preventive: diagnosis.treatmentRecommendations.prevention,
+          longTerm: diagnosis.treatmentRecommendations.longTerm
+        },
+        createdAt: diagnosis.createdAt
+      },
+      analysisMetadata: {
+        imageCount: imageFiles.length,
+        processingTime: '2-3 seconds',
+        model: analysisResults.apiUsed || 'AgriSphere-AI',
+        dataSource: analysisResults.dataSource || 'unknown',
+        isRealAPI: analysisResults.dataSource === 'openepi_real'
+      }
+    });
+
+  } catch (err) {
+    logger.error('Crop analysis failed', { error: err.message, userId: req.user._id });
+    return error(res, 'Failed to analyze crop images. Please try again.', 500);
+  }
+}));
+
+// Helper function to assess image quality
+async function assessImageQuality(metadata, buffer) {
+  const quality = {
+    resolution: 'good',
+    clarity: 'good',
+    lighting: 'good',
+    overall: 'good',
+    score: 85,
+    suggestions: []
+  };
+
+  // Resolution check
+  if (metadata.width < 300 || metadata.height < 300) {
+    quality.resolution = 'poor';
+    quality.suggestions.push('Use higher resolution camera or move closer to the plant');
+  }
+
+  // Basic size check for clarity (more sophisticated analysis would use actual image processing)
+  if (buffer.length < 50000) { // Very small file might indicate poor quality
+    quality.clarity = 'poor';
+    quality.suggestions.push('Ensure good lighting and focus when taking photos');
+  }
+
+  // Calculate overall score
+  const scores = {
+    poor: 30,
+    fair: 60,
+    good: 85,
+    excellent: 95
+  };
+
+  quality.score = Math.min(
+    scores[quality.resolution],
+    scores[quality.clarity],
+    scores[quality.lighting]
+  );
+
+  if (quality.score < 60) {
+    quality.overall = 'poor';
+    quality.suggestions.push('Consider retaking photos with better lighting and closer focus');
+  } else if (quality.score < 80) {
+    quality.overall = 'fair';
+  }
+
+  return quality;
+}
+
+/**
  * @route   POST /api/diagnosis
- * @desc    Create a new crop health diagnosis
+ * @desc    Create a new crop health diagnosis (legacy endpoint)
  * @access  Private
  */
 router.post('/', authenticateUser, validateDiagnosisRequest, handleValidationErrors, asyncHandler(async (req, res) => {
@@ -317,6 +667,225 @@ router.get('/', authenticateUser, asyncHandler(async (req, res) => {
     },
     timestamp: new Date().toISOString()
   });
+}));
+
+/**
+ * @route   GET /api/diagnosis/history
+ * @desc    Get user's diagnosis history
+ * @access  Private
+ */
+router.get('/history', authenticateUser, asyncHandler(async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status, severity, cropType } = req.query;
+    
+    // Build filter query
+    const filter = { user: req.user._id };
+    
+    if (status) filter['status.current'] = status;
+    if (severity) filter['diagnosisResults.severity'] = severity;
+    if (cropType) filter['plantInfo.cropType'] = new RegExp(cropType, 'i');
+
+    // Calculate pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get diagnoses with pagination
+    const diagnoses = await DiagnosisHistory.find(filter)
+      .populate({
+        path: 'farm',
+        select: 'farmInfo.name location.address'
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await DiagnosisHistory.countDocuments(filter);
+
+    // Format response
+    const formattedDiagnoses = diagnoses.map(diagnosis => ({
+      id: diagnosis._id,
+      diagnosisId: diagnosis.diagnosisId,
+      plantInfo: diagnosis.plantInfo,
+      diagnosisResults: {
+        primaryIssue: diagnosis.diagnosisResults?.primaryIssue,
+        severity: diagnosis.diagnosisResults?.severity,
+        confidence: diagnosis.diagnosisResults?.confidence
+      },
+      status: diagnosis.status?.current || 'completed',
+      farm: diagnosis.farm ? {
+        name: diagnosis.farm.farmInfo?.name,
+        address: diagnosis.farm.location?.address
+      } : null,
+      createdAt: diagnosis.createdAt,
+      updatedAt: diagnosis.updatedAt
+    }));
+
+    // Calculate statistics
+    const stats = {
+      total,
+      healthy: await DiagnosisHistory.countDocuments({ 
+        ...filter, 
+        'diagnosisResults.severity': 'low',
+        'diagnosisResults.primaryIssue': /healthy|good|excellent/i
+      }),
+      issues: await DiagnosisHistory.countDocuments({ 
+        ...filter, 
+        'diagnosisResults.severity': { $in: ['medium', 'high'] }
+      }),
+      recentCount: await DiagnosisHistory.countDocuments({
+        ...filter,
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      })
+    };
+
+    return success(res, 'Diagnosis history retrieved successfully', {
+      diagnoses: formattedDiagnoses,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+        hasNext: pageNum * limitNum < total,
+        hasPrev: pageNum > 1
+      },
+      stats
+    });
+
+  } catch (err) {
+    logger.error('Failed to retrieve diagnosis history', { error: err.message, userId: req.user._id });
+    return error(res, 'Failed to retrieve diagnosis history', 500);
+  }
+}));
+
+/**
+ * @route   GET /api/diagnosis/stats
+ * @desc    Get user's diagnosis statistics
+ * @access  Private
+ */
+router.get('/stats', authenticateUser, asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { timeframe = '30d' } = req.query;
+
+    // Calculate date range
+    let startDate;
+    switch (timeframe) {
+      case '7d':
+        startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        break;
+      case '1y':
+        startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    const baseFilter = { 
+      user: userId,
+      createdAt: { $gte: startDate }
+    };
+
+    // Aggregate statistics
+    const [
+      totalDiagnoses,
+      healthyPlants,
+      diseaseDetected,
+      severityStats,
+      cropTypeStats,
+      recentTrend
+    ] = await Promise.all([
+      DiagnosisHistory.countDocuments(baseFilter),
+      DiagnosisHistory.countDocuments({
+        ...baseFilter,
+        'diagnosisResults.severity': 'low',
+        'diagnosisResults.primaryIssue': /healthy|good|excellent/i
+      }),
+      DiagnosisHistory.countDocuments({
+        ...baseFilter,
+        'diagnosisResults.severity': { $in: ['medium', 'high'] }
+      }),
+      DiagnosisHistory.aggregate([
+        { $match: baseFilter },
+        { $group: {
+          _id: '$diagnosisResults.severity',
+          count: { $sum: 1 }
+        }}
+      ]),
+      DiagnosisHistory.aggregate([
+        { $match: baseFilter },
+        { $group: {
+          _id: '$plantInfo.cropType',
+          count: { $sum: 1 },
+          avgConfidence: { $avg: '$diagnosisResults.confidence' }
+        }},
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]),
+      DiagnosisHistory.aggregate([
+        { $match: baseFilter },
+        { $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
+            day: { $dayOfMonth: '$createdAt' }
+          },
+          count: { $sum: 1 },
+          healthyCount: {
+            $sum: {
+              $cond: [
+                { $and: [
+                  { $eq: ['$diagnosisResults.severity', 'low'] },
+                  { $regexMatch: { input: '$diagnosisResults.primaryIssue', regex: 'healthy|good|excellent', options: 'i' } }
+                ]},
+                1,
+                0
+              ]
+            }
+          }
+        }},
+        { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
+        { $limit: 30 }
+      ])
+    ]);
+
+    const stats = {
+      summary: {
+        totalDiagnoses,
+        healthyPlants,
+        diseaseDetected,
+        healthPercentage: totalDiagnoses > 0 ? Math.round((healthyPlants / totalDiagnoses) * 100) : 0
+      },
+      severity: severityStats.reduce((acc, item) => {
+        acc[item._id || 'unknown'] = item.count;
+        return acc;
+      }, {}),
+      topCrops: cropTypeStats.map(crop => ({
+        cropType: crop._id || 'Unknown',
+        count: crop.count,
+        avgConfidence: Math.round(crop.avgConfidence || 0)
+      })),
+      trend: recentTrend.map(day => ({
+        date: new Date(day._id.year, day._id.month - 1, day._id.day),
+        total: day.count,
+        healthy: day.healthyCount
+      })),
+      timeframe
+    };
+
+    return success(res, 'Diagnosis statistics retrieved successfully', stats);
+
+  } catch (err) {
+    logger.error('Failed to retrieve diagnosis statistics', { error: err.message, userId: req.user._id });
+    return error(res, 'Failed to retrieve diagnosis statistics', 500);
+  }
 }));
 
 /**

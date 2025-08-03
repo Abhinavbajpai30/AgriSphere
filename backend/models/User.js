@@ -180,6 +180,22 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true
       },
+      irrigation: {
+        type: Boolean,
+        default: true
+      },
+      weather: {
+        type: Boolean,
+        default: true
+      },
+      planning: {
+        type: Boolean,
+        default: true
+      },
+      analytics: {
+        type: Boolean,
+        default: true
+      },
       smsNotifications: {
         type: Boolean,
         default: true

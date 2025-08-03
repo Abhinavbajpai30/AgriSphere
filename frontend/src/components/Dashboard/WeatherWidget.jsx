@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { motion } from 'framer-motion'
 import { 
   SunIcon, 
@@ -6,7 +7,7 @@ import {
   BeakerIcon 
 } from '@heroicons/react/24/outline'
 
-const WeatherWidget = ({ weatherData }) => {
+const WeatherWidget = memo(({ weatherData }) => {
   if (!weatherData?.current) {
     return (
       <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-6 border border-white/30">
@@ -58,7 +59,17 @@ const WeatherWidget = ({ weatherData }) => {
 
       <div className="relative z-10">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white/90">Current Weather</h3>
+          <div>
+            <h3 className="text-lg font-semibold text-white/90">Current Weather</h3>
+            {weatherData?.location?.name && (
+              <p className="text-sm text-white/70 mt-1">
+                📍 {weatherData.location.name}
+                {weatherData.location.country === 'Coordinates' && (
+                  <span className="text-xs text-white/50 ml-1">(GPS)</span>
+                )}
+              </p>
+            )}
+          </div>
           {alerts?.length > 0 && (
             <motion.div
               animate={{ pulse: [1, 1.2, 1] }}
@@ -224,6 +235,6 @@ const WeatherWidget = ({ weatherData }) => {
       </div>
     </motion.div>
   )
-}
+})
 
 export default WeatherWidget

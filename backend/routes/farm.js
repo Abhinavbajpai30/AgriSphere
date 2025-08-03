@@ -6,6 +6,7 @@
 
 const express = require('express');
 const { body, param, query } = require('express-validator');
+const mongoose = require('mongoose');
 const Farm = require('../models/Farm');
 const User = require('../models/User');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -16,41 +17,8 @@ const soilApi = require('../services/soilApi');
 
 const router = express.Router();
 
-// Authentication middleware (simplified - should be in separate file)
-const authenticateUser = asyncHandler(async (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Access denied. No token provided.',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  try {
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const user = await User.findById(decoded.userId);
-    if (!user || !user.status.isActive) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid token or user inactive',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Invalid token',
-      timestamp: new Date().toISOString()
-    });
-  }
-});
+// Use proper authentication middleware
+const { authenticateUser } = require('../middleware/auth');
 
 // Validation middleware for farm creation
 const validateFarmCreation = [
@@ -186,10 +154,25 @@ router.get('/', authenticateUser, asyncHandler(async (req, res) => {
     isActive = true 
   } = req.query;
 
+  // Debug: Log user information
+  console.log('🔍 Farm API Debug:');
+  console.log('  req.user:', req.user);
+  console.log('  req.user._id:', req.user._id);
+  console.log('  req.user._id type:', typeof req.user._id);
+  console.log('  req.user._id toString:', req.user._id.toString());
+
   const query = { 
-    owner: req.user._id,
-    'status.isActive': isActive === 'true'
+    owner: req.user._id
   };
+  
+  console.log('  Query:', JSON.stringify(query, null, 2));
+  console.log('  Query owner type:', typeof query.owner);
+  console.log('  Query owner is ObjectId:', query.owner instanceof mongoose.Types.ObjectId);
+  
+  // Temporarily remove isActive filter to debug
+  // if (isActive !== undefined) {
+  //   query['status.isActive'] = isActive === 'true' || isActive === true;
+  // }
 
   if (farmType) {
     query['farmInfo.farmType'] = farmType;
@@ -208,10 +191,7 @@ router.get('/', authenticateUser, asyncHandler(async (req, res) => {
   };
 
   const farms = await Farm.find(query)
-    .populate(options.populate)
-    .sort(options.sort)
-    .limit(options.limit * 1)
-    .skip((options.page - 1) * options.limit);
+    .sort(options.sort);
 
   const total = await Farm.countDocuments(query);
 
@@ -304,6 +284,55 @@ router.put('/:farmId', authenticateUser, asyncHandler(async (req, res) => {
     message: 'Farm updated successfully',
     data: {
       farm
+    },
+    timestamp: new Date().toISOString()
+  });
+}));
+
+/**
+ * @route   DELETE /api/farm/:farmId
+ * @desc    Delete a farm
+ * @access  Private
+ */
+router.delete('/:farmId', authenticateUser, asyncHandler(async (req, res) => {
+  const { farmId } = req.params;
+
+  // Validate farmId
+  if (!mongoose.Types.ObjectId.isValid(farmId)) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Invalid farm ID',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  const farm = await Farm.findOne({
+    _id: farmId,
+    owner: req.user._id
+  });
+
+  if (!farm) {
+    return res.status(404).json({
+      status: 'error',
+      message: 'Farm not found',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // Delete the farm
+  await Farm.findByIdAndDelete(farmId);
+
+  logger.info('Farm deleted', {
+    farmId: farm._id,
+    userId: req.user._id,
+    farmName: farm.farmInfo.name
+  });
+
+  res.json({
+    status: 'success',
+    message: 'Farm deleted successfully',
+    data: {
+      deletedFarmId: farmId
     },
     timestamp: new Date().toISOString()
   });

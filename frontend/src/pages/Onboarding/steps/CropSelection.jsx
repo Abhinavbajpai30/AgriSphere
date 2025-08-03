@@ -4,7 +4,7 @@ import { HeartIcon, CalendarIcon, SunIcon, SparklesIcon, CheckIcon } from '@hero
 import { HeartIcon as HeartIconSolid } from '@heroicons/react/24/solid'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
-const CropSelection = ({ onNext, onBack, onboardingData, updateData }) => {
+const CropSelection = ({ onNext, onBack, onboardingData, updateData, isAddFarm = false }) => {
   const { t } = useLanguage()
   const [selectedCrops, setSelectedCrops] = useState(onboardingData.crops || [])
   const [currentStep, setCurrentStep] = useState('selection') // selection, planting, growth

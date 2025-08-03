@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import { CheckCircleIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 
@@ -57,6 +58,16 @@ const OnboardingFlow = () => {
   const [completedSteps, setCompletedSteps] = useState(new Set())
   const [isLoading, setIsLoading] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' })
+
+  // Show toast notification
+  const showToast = (message, type = 'success') => {
+    setToast({ show: true, message, type })
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' })
+    }, 5000)
+  }
 
   // Define onboarding steps
   const steps = [
@@ -229,6 +240,9 @@ const OnboardingFlow = () => {
         // Show success message
         console.log('Onboarding completed successfully:', data.message)
         
+        // Show success toast
+        showToast('Farm setup completed successfully! Welcome to AgriSphere! 🎉', 'success')
+        
         // Redirect to dashboard
         navigate('/dashboard')
       } else {
@@ -236,7 +250,7 @@ const OnboardingFlow = () => {
       }
     } catch (error) {
       console.error('Onboarding completion failed:', error)
-      alert('Failed to complete onboarding. Please try again.')
+      showToast('Failed to complete onboarding. Please try again.', 'error')
     } finally {
       setIsLoading(false)
     }
@@ -276,15 +290,49 @@ const OnboardingFlow = () => {
     
     console.log('Has completed onboarding steps:', hasCompletedOnboardingSteps)
     
-    // Only redirect if we're not already in the onboarding flow
-    if (isAuthenticated && user && !isProfileIncomplete(user) && !location.pathname.startsWith('/onboarding')) {
-      console.log('Redirecting to dashboard - user profile is complete')
+    // Only redirect if user has completed onboarding AND we're not already in the onboarding flow
+    if (isAuthenticated && user && user.appUsage?.onboardingCompleted && !location.pathname.startsWith('/onboarding')) {
+      console.log('Redirecting to dashboard - user has completed onboarding')
       navigate('/dashboard');
     }
   }, [isAuthenticated, user, navigate, location.pathname, onboardingData]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-orange-50 relative">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full"
+          >
+            <div className={`rounded-xl shadow-2xl border-l-4 p-4 ${
+              toast.type === 'error' 
+                ? 'bg-red-50 border-red-400 text-red-800' 
+                : 'bg-green-50 border-green-400 text-green-800'
+            }`}>
+              <div className="flex items-start space-x-3">
+                {toast.type === 'error' ? (
+                  <ExclamationTriangleIcon className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                ) : (
+                  <CheckCircleIcon className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+                )}
+                <div className="flex-1">
+                  <p className="font-medium">{toast.message}</p>
+                </div>
+                <button
+                  onClick={() => setToast({ show: false, message: '', type: 'success' })}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Progress Bar - Only show after welcome step */}
       {currentStep > 0 && (
         <motion.div
@@ -456,24 +504,21 @@ const isProfileIncomplete = (user) => {
                       user?.personalInfo?.lastName &&
                       user?.personalInfo?.phoneNumber
   
-  // Check if user has farming profile
-  const hasFarmingProfile = user?.farmingProfile?.experienceLevel
-  
   // Check if user has location
   const hasLocation = user?.location?.coordinates
   
   // Check if user has farm setup (this is what onboarding is for)
   const hasFarmSetup = user?.farms && user.farms.length > 0
   
-  // User is incomplete if they don't have basic info, farming profile, location, OR farm setup
-  // But if they're already logged in and have basic info, they might just need to complete onboarding
-  if (hasBasicInfo && hasFarmingProfile && hasLocation) {
-    // User has basic profile info, they just need to complete onboarding
+  // User is incomplete if they don't have basic info OR location
+  // Note: farmingProfile.experienceLevel is optional and not required for onboarding completion
+  if (hasBasicInfo && hasLocation) {
+    // User has basic profile info and location, they just need to complete onboarding
     return !hasFarmSetup
   }
   
-  // User is incomplete if they don't have basic profile info
-  return !hasBasicInfo || !hasFarmingProfile || !hasLocation
+  // User is incomplete if they don't have basic profile info or location
+  return !hasBasicInfo || !hasLocation
 }
 
 export default OnboardingFlow

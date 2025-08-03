@@ -88,7 +88,7 @@ const FarmDrawer = ({ isDrawing, onPointAdd, onComplete, farmBoundary, currentPo
   )
 }
 
-const FarmPlotting = ({ onNext, onBack, onboardingData, updateData }) => {
+const FarmPlotting = ({ onNext, onBack, onboardingData, updateData, isAddFarm = false }) => {
   const { t } = useLanguage()
   const [isDrawing, setIsDrawing] = useState(false)
   const [farmBoundary, setFarmBoundary] = useState(onboardingData.farmBoundary?.coordinates || [])

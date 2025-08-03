@@ -144,7 +144,7 @@ const FloatingNavigation = () => {
 
               {/* Quick Action Button */}
               <button
-                onClick={() => navigate('/diagnosis')}
+                onClick={() => navigate('/farm/add')}
                 className="w-12 h-12 bg-gradient-to-r from-green-400 to-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg hover:shadow-xl transition-shadow duration-300 cursor-pointer"
                 style={{ pointerEvents: 'auto', cursor: 'pointer' }}
               >

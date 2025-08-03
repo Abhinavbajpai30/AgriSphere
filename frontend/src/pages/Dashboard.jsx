@@ -312,7 +312,7 @@ const Dashboard = () => {
                     </h1>
                   </div>
                   <p className="text-white/90 text-lg">
-                    {dashboardData?.farm?.name || 'Your Farm'} • {currentTime.toLocaleDateString()}
+                    {dashboardData?.farm?.name || 'Your Farm'} • {dashboardData?.weather?.location?.name || 'Coordinates'} • {currentTime.toLocaleDateString()}
                   </p>
                 </div>
                 

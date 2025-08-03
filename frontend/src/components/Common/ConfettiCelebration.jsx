@@ -1,68 +1,114 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 
-const ConfettiCelebration = ({ isActive, duration = 3000, particleCount = 50 }) => {
-  const [particles, setParticles] = useState([])
+const ConfettiCelebration = ({ show, onComplete, color = 'multi' }) => {
+  const canvasRef = useRef(null)
+  const animationRef = useRef(null)
+  const particlesRef = useRef([])
 
   useEffect(() => {
-    if (isActive) {
-      const newParticles = Array.from({ length: particleCount }, (_, i) => ({
-        id: i,
-        x: Math.random() * window.innerWidth,
-        y: -20,
-        color: ['#10b981', '#34d399', '#f59e0b', '#fb923c', '#ef4444', '#8b5cf6', '#06b6d4'][i % 7],
-        size: Math.random() * 8 + 4,
-        rotation: Math.random() * 360,
-        velocityX: (Math.random() - 0.5) * 4,
-        velocityY: Math.random() * 3 + 2,
-        shape: ['circle', 'square', 'triangle'][Math.floor(Math.random() * 3)]
-      }))
-      setParticles(newParticles)
+    if (!show) return
 
-      // Clear particles after animation
-      const timer = setTimeout(() => {
-        setParticles([])
-      }, duration)
+    const canvas = canvasRef.current
+    if (!canvas) return
 
-      return () => clearTimeout(timer)
+    const ctx = canvas.getContext('2d')
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+
+    // Create particles
+    const colors = color === 'multi' 
+      ? ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#EC4899']
+      : color === 'green' 
+      ? ['#10B981', '#059669', '#34D399', '#6EE7B7']
+      : ['#3B82F6', '#1D4ED8', '#60A5FA', '#93C5FD']
+
+    const particles = []
+    const particleCount = 100
+
+    for (let i = 0; i < particleCount; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: -10,
+        vx: (Math.random() - 0.5) * 8,
+        vy: Math.random() * 3 + 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 6 + 2,
+        gravity: 0.1,
+        life: 1,
+        decay: Math.random() * 0.01 + 0.005,
+        shape: Math.random() > 0.5 ? 'circle' : 'square'
+      })
     }
-  }, [isActive, duration, particleCount])
 
-  if (!isActive || particles.length === 0) return null
+    particlesRef.current = particles
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      particles.forEach((particle, index) => {
+        // Update position
+        particle.x += particle.vx
+        particle.y += particle.vy
+        particle.vy += particle.gravity
+        particle.life -= particle.decay
+
+        // Remove dead particles
+        if (particle.life <= 0 || particle.y > canvas.height + 50) {
+          particles.splice(index, 1)
+          return
+        }
+
+        // Draw particle
+        ctx.save()
+        ctx.globalAlpha = particle.life
+        ctx.fillStyle = particle.color
+        
+        if (particle.shape === 'circle') {
+          ctx.beginPath()
+          ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2)
+          ctx.fill()
+        } else {
+          ctx.fillRect(
+            particle.x - particle.size / 2,
+            particle.y - particle.size / 2,
+            particle.size,
+            particle.size
+          )
+        }
+        ctx.restore()
+      })
+
+      if (particles.length > 0) {
+        animationRef.current = requestAnimationFrame(animate)
+      } else {
+        onComplete?.()
+      }
+    }
+
+    animationRef.current = requestAnimationFrame(animate)
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [show, color, onComplete])
+
+  if (!show) return null
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
-      {particles.map((particle) => (
-        <motion.div
-          key={particle.id}
-          className={`absolute ${particle.shape === 'circle' ? 'rounded-full' : 
-            particle.shape === 'triangle' ? 'polygon' : 'rounded-sm'}`}
-          style={{
-            backgroundColor: particle.color,
-            width: particle.size,
-            height: particle.size,
-            left: particle.x,
-            top: particle.y,
-          }}
-          initial={{
-            opacity: 1,
-            scale: 0,
-            rotate: particle.rotation
-          }}
-          animate={{
-            opacity: [1, 1, 0],
-            scale: [0, 1, 0.8],
-            x: particle.velocityX * 100,
-            y: window.innerHeight + 100,
-            rotate: particle.rotation + 720
-          }}
-          transition={{
-            duration: duration / 1000,
-            ease: "easeOut"
-          }}
-        />
-      ))}
-    </div>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 pointer-events-none z-50"
+    >
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full"
+      />
+    </motion.div>
   )
 }
 

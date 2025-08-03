@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
+import { Suspense, lazy } from 'react'
 import { LanguageProvider } from './contexts/LanguageContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { OfflineProvider } from './contexts/OfflineContext'
@@ -8,20 +9,21 @@ import ProtectedRoute from './components/Auth/ProtectedRoute'
 import ErrorBoundary from './components/Common/ErrorBoundary'
 import LoadingScreen from './components/Common/LoadingScreen'
 
-// Pages - Import as needed when created
+// Critical pages (loaded immediately)
 import Home from './pages/Home'
 import Login from './pages/Auth/Login'
 import Register from './pages/Auth/Register'
-import Dashboard from './pages/Dashboard'
-import FarmManagement from './pages/Farm/FarmManagement'
-import CropDiagnosis from './pages/Diagnosis/CropDiagnosis'
-import IrrigationPlanning from './pages/Irrigation/IrrigationPlanning'
-import CropPlanning from './pages/Planning/CropPlanning'
-import Profile from './pages/Profile/Profile'
-import Settings from './pages/Settings/Settings'
 
-// Onboarding Flow
-import OnboardingFlow from './pages/Onboarding/OnboardingFlow'
+// Lazy-loaded pages (loaded on demand)
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const FarmManagement = lazy(() => import('./pages/Farm/FarmManagement'))
+const CropDiagnosis = lazy(() => import('./pages/Diagnosis/CropDiagnosis'))
+const IrrigationPlanning = lazy(() => import('./pages/Irrigation/IrrigationPlanning'))
+const CropPlanning = lazy(() => import('./pages/Planning/CropPlanning'))
+const Profile = lazy(() => import('./pages/Profile/Profile'))
+const Settings = lazy(() => import('./pages/Settings/Settings'))
+const OnboardingFlow = lazy(() => import('./pages/Onboarding/OnboardingFlow'))
+const AddFarm = lazy(() => import('./pages/Farm/AddFarm'))
 
 function App() {
   return (
@@ -32,14 +34,15 @@ function App() {
             <Router>
               <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-orange-50">
                 <AnimatePresence mode="wait">
-                  <Routes>
-                    {/* Public Routes */}
-                    <Route path="/" element={<Layout><Home /></Layout>} />
-                    <Route path="/login" element={<Layout><Login /></Layout>} />
-                    <Route path="/register" element={<Layout><Register /></Layout>} />
-                    
-                    {/* Onboarding Flow */}
-                    <Route path="/onboarding/*" element={<Layout><OnboardingFlow /></Layout>} />
+                  <Suspense fallback={<LoadingScreen />}>
+                    <Routes>
+                      {/* Public Routes */}
+                      <Route path="/" element={<Layout><Home /></Layout>} />
+                      <Route path="/login" element={<Layout><Login /></Layout>} />
+                      <Route path="/register" element={<Layout><Register /></Layout>} />
+                      
+                      {/* Onboarding Flow */}
+                      <Route path="/onboarding/*" element={<Layout><OnboardingFlow /></Layout>} />
                     
                     {/* Protected Routes */}
                     <Route path="/dashboard" element={
@@ -53,6 +56,12 @@ function App() {
           <Route path="/farm" element={
             <ProtectedRoute>
               <Layout><FarmManagement /></Layout>
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/farm/add" element={
+            <ProtectedRoute>
+              <Layout><AddFarm /></Layout>
             </ProtectedRoute>
           } />
           
@@ -104,8 +113,9 @@ function App() {
               </div>
             </Layout>
           } />
-        </Routes>
-      </AnimatePresence>
+                    </Routes>
+                  </Suspense>
+                </AnimatePresence>
     </div>
             </Router>
           </AuthProvider>

@@ -9,7 +9,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
-const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const hpp = require('hpp');
 
@@ -57,18 +56,8 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Rate limiting to prevent abuse
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: {
-    error: 'Too many requests from this IP, please try again later.',
-    retryAfter: '15 minutes'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', limiter);
+// Rate limiting removed for frontend-only access
+// Global rate limiting disabled as this backend is called only through the frontend
 
 // Request context and response helpers
 app.use(addRequestContext);
@@ -141,12 +130,18 @@ const HOST = process.env.HOST || 'localhost';
 
 const server = app.listen(PORT, HOST, () => {
   logger.info(`AgriSphere Backend running on ${HOST}:${PORT} in ${process.env.NODE_ENV} mode`);
+  
+  // Initialize notification service after server starts
+  const notificationService = require('./services/notificationService');
+  notificationService.initialize();
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   logger.error('Unhandled Promise Rejection:', err);
   server.close(() => {
+    const notificationService = require('./services/notificationService');
+    notificationService.stopAll();
     process.exit(1);
   });
 });
@@ -154,7 +149,19 @@ process.on('unhandledRejection', (err) => {
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception:', err);
+  const notificationService = require('./services/notificationService');
+  notificationService.stopAll();
   process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    const notificationService = require('./services/notificationService');
+    notificationService.stopAll();
+    process.exit(0);
+  });
 });
 
 module.exports = app;

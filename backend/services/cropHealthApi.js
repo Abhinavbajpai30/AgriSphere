@@ -10,7 +10,36 @@ const { ApiError } = require('../middleware/errorHandler');
 
 class CropHealthApiService {
   constructor() {
-    this.openEpi = require('./openEpiService');
+    // OpenEPI API configuration
+    this.openEpiConfig = {
+      authURL: 'https://auth.openepi.io/realms/openepi/protocol/openid-connect/token',
+      baseURL: process.env.OPENEPI_API_URL || 'https://api.openepi.io',
+      cropHealthEndpoint: '/crop-health/predictions/single-HLT',
+      clientId: process.env.OPENEPI_CLIENT_ID || '',
+      clientSecret: process.env.OPENEPI_CLIENT_SECRET || '',
+      timeout: 30000 // 30 seconds for image analysis
+    };
+    
+    // Token cache
+    this.accessToken = null;
+    this.tokenExpiry = null;
+    
+    // Disease code to readable name mapping
+    this.diseaseMapping = {
+      'HLT': 'Healthy Plant',
+      'CSSVD': 'Cassava Severe Mosaic Disease',
+      'ANT': 'Anthracnose',
+      'CMD': 'Cassava Mosaic Disease',
+      'BR': 'Bacterial Ring',
+      'CBSD': 'Cassava Brown Streak Disease',
+      'FW': 'Fusarium Wilt',
+      'FAW': 'Fall Armyworm',
+      'ALS': 'Angular Leaf Spot',
+      'MSV': 'Maize Streak Virus',
+      'MLB': 'Maize Lethal Browning',
+      'BS': 'Brown Streak',
+      'MLN': 'Maize Lethal Necrosis'
+    };
     
     // Crop health cache duration
     this.cropAnalysisCacheTTL = 3600; // 1 hour
@@ -163,24 +192,655 @@ class CropHealthApiService {
   }
 
   /**
-   * Analyze crop image for disease detection
+   * Analyze crop image for disease detection with real OpenEPI integration
    */
-  async analyzeCropImage(imageData, cropType) {
+  async analyzeCropImage(imagePath, cropType = 'unknown') {
     try {
-      if (!imageData) {
-        throw new ApiError('Image data is required', 400);
+      if (!imagePath) {
+        throw new ApiError('Image path is required', 400);
       }
 
-      // Mock analysis result (replace with actual AI/ML API call)
-      const analysisResult = this.generateMockDiagnosisResult(cropType);
+      logger.info('Starting crop image analysis', { cropType, imagePath });
+
+      // Try real OpenEPI API if configured
+      if (this.openEpiConfig.clientId && this.openEpiConfig.clientSecret) {
+                  try {
+            const realAnalysis = await this.callOpenEpiAPI(imagePath, cropType);
+            console.log('🔍 OpenEPI Raw Response:', JSON.stringify(realAnalysis, null, 2));
+            if (realAnalysis) {
+            const result = this.formatDiagnosisResult(realAnalysis, cropType);
+            result.dataSource = 'openepi_real';
+            result.apiUsed = 'OpenEPI Crop Health API';
+            logger.info('Crop image analysis completed (real OpenEPI)', { cropType });
+            return result;
+          }
+        } catch (apiError) {
+          logger.warn('OpenEPI API failed, falling back to mock', { error: apiError.message });
+        }
+      }
+
+      // Fallback to enhanced mock analysis
+      const mockResult = this.generateEnhancedMockDiagnosisResult(cropType, imagePath);
+      mockResult.dataSource = 'mock_enhanced';
+      mockResult.apiUsed = 'AgriSphere Mock AI';
       
-      logger.info('Crop image analysis completed', { cropType });
-      return analysisResult;
+      logger.info('Crop image analysis completed (mock)', { cropType });
+      return mockResult;
 
     } catch (error) {
       logger.error('Failed to analyze crop image', { cropType, error: error.message });
       throw new ApiError('Crop image analysis service temporarily unavailable', 503);
     }
+  }
+
+  /**
+   * Get OpenEPI access token using client credentials
+   */
+  async getOpenEpiToken() {
+    // Check if we have a valid cached token
+    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+      return this.accessToken;
+    }
+
+    try {
+      const response = await axios.post(
+        this.openEpiConfig.authURL,
+        {
+          grant_type: 'client_credentials',
+          client_id: this.openEpiConfig.clientId,
+          client_secret: this.openEpiConfig.clientSecret,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          timeout: this.openEpiConfig.timeout
+        }
+      );
+
+      if (response.data && response.data.access_token) {
+        this.accessToken = response.data.access_token;
+        // Set expiry to 50 minutes (tokens typically last 1 hour)
+        this.tokenExpiry = Date.now() + (50 * 60 * 1000);
+        return this.accessToken;
+      } else {
+        throw new Error('No access token received from OpenEPI');
+      }
+    } catch (error) {
+      logger.error('Failed to get OpenEPI token', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Call real OpenEPI API for crop health analysis
+   */
+  async callOpenEpiAPI(imagePath, cropType) {
+    const fs = require('fs').promises;
+
+    try {
+      // Get access token
+      const token = await this.getOpenEpiToken();
+      
+      // Read image file
+      const imageBuffer = await fs.readFile(imagePath);
+
+      const response = await axios.post(
+        `${this.openEpiConfig.baseURL}${this.openEpiConfig.cropHealthEndpoint}`,
+        imageBuffer,
+        {
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Authorization': `Bearer ${token}`,
+            'User-Agent': 'AgriSphere/1.0'
+          },
+          timeout: this.openEpiConfig.timeout
+        }
+      );
+
+      return response.data;
+    } catch (error) {
+      logger.error('OpenEPI API call failed', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Format OpenEPI crop health API response to standard format
+   */
+  formatDiagnosisResult(apiResponse, cropType) {
+    // Process the disease probability scores
+    const analysisResult = this.processDiseaseProbabilities(apiResponse);
+    
+    return {
+      confidence: analysisResult.confidence,
+      primaryIssue: analysisResult.primaryDiagnosis,
+      severity: analysisResult.severity,
+      plantInfo: {
+        cropType: cropType,
+        plantStage: 'maturation',
+        plantHealth: analysisResult.plantHealth
+      },
+      diseases: analysisResult.diseases,
+      pests: [],
+      deficiencies: [],
+      environmentalStress: [],
+      recommendations: this.generateRecommendations(analysisResult),
+      metadata: {
+        analysisDate: new Date(),
+        apiVersion: '1.0',
+        model: 'OpenEPI-CropHealth',
+        processingTime: '2-3 seconds'
+      }
+    };
+  }
+
+  /**
+   * Process disease probability scores from OpenEPI API
+   */
+  processDiseaseProbabilities(apiResponse) {
+    console.log('🔍 Processing OpenEPI Response...');
+    console.log('📊 Response keys:', Object.keys(apiResponse));
+    
+    // Find the disease/condition with highest probability
+    let highestProbability = 0;
+    let primaryDiseaseCode = 'HLT';
+    
+    for (const [code, probability] of Object.entries(apiResponse)) {
+      console.log(`📈 ${code}: ${probability} (${Math.round(probability * 100)}%)`);
+      if (probability > highestProbability) {
+        highestProbability = probability;
+        primaryDiseaseCode = code;
+      }
+    }
+    
+    console.log(`🎯 Highest probability: ${primaryDiseaseCode} (${Math.round(highestProbability * 100)}%)`);
+
+    // Only consider results with confidence above 50%
+    const isConfident = highestProbability >= 0.5;
+    const confidence = Math.round(highestProbability * 100);
+    
+    // Get readable disease name
+    const primaryDiagnosis = this.diseaseMapping[primaryDiseaseCode] || primaryDiseaseCode;
+    
+    // Determine plant health and severity
+    const isHealthy = primaryDiseaseCode === 'HLT';
+    const plantHealth = isHealthy ? 'excellent' : (confidence > 75 ? 'poor' : 'fair');
+    const severity = isHealthy ? 'low' : (confidence > 75 ? 'high' : 'medium');
+
+    // Create diseases array for non-healthy diagnoses
+    const diseases = [];
+    if (!isHealthy && isConfident) {
+      diseases.push({
+        name: primaryDiagnosis,
+        code: primaryDiseaseCode,
+        confidence: confidence,
+        severity: severity,
+        description: `Detected with ${confidence}% confidence`
+      });
+    }
+
+    // Get all significant detections (above 10%)
+    const allDetections = Object.entries(apiResponse)
+      .filter(([code, prob]) => prob >= 0.1)
+      .map(([code, prob]) => ({
+        code,
+        name: this.diseaseMapping[code] || code,
+        probability: Math.round(prob * 100)
+      }))
+      .sort((a, b) => b.probability - a.probability);
+
+    const result = {
+      confidence: confidence,
+      primaryDiagnosis: isConfident ? primaryDiagnosis : 'Unclear diagnosis - low confidence',
+      primaryDiseaseCode,
+      severity,
+      plantHealth,
+      diseases,
+      isHealthy,
+      isConfident,
+      allDetections
+    };
+    
+    console.log('🏥 Final Analysis Result:');
+    console.log(`   Primary Disease: ${result.primaryDiagnosis}`);
+    console.log(`   Disease Code: ${result.primaryDiseaseCode}`);
+    console.log(`   Confidence: ${result.confidence}%`);
+    console.log(`   Severity: ${result.severity}`);
+    console.log(`   Plant Health: ${result.plantHealth}`);
+    console.log(`   Is Healthy: ${result.isHealthy}`);
+    console.log(`   Is Confident: ${result.isConfident}`);
+    
+    return result;
+  }
+
+  /**
+   * Generate treatment recommendations based on analysis results
+   */
+  generateRecommendations(analysisResult) {
+    const { isHealthy, primaryDiseaseCode, confidence, isConfident } = analysisResult;
+    
+    if (isHealthy) {
+      return {
+        immediate: [
+          {
+            title: 'Continue current care routine',
+            description: 'Your plant looks healthy! Keep up the good work.',
+            urgency: 'low',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        preventive: [
+          {
+            title: 'Regular monitoring',
+            description: 'Check plants weekly for early signs of issues',
+            urgency: 'low',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          },
+          {
+            title: 'Maintain soil moisture',
+            description: 'Ensure consistent watering schedule',
+            urgency: 'low',
+            estimated_cost: 'Low',
+            local_availability: 'Common'
+          }
+        ],
+        longTerm: [
+          {
+            title: 'Soil testing',
+            description: 'Test soil pH and nutrients annually',
+            urgency: 'low',
+            estimated_cost: 'Medium',
+            local_availability: 'Agricultural centers'
+          }
+        ]
+      };
+    }
+
+    if (!isConfident) {
+      return {
+        immediate: [
+          {
+            title: 'Retake photo in better lighting',
+            description: 'Take a clearer photo in good natural light for better diagnosis',
+            urgency: 'low',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        preventive: [
+          {
+            title: 'Monitor plant closely',
+            description: 'Watch for any changes in plant condition',
+            urgency: 'medium',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        longTerm: [
+          {
+            title: 'Consult agricultural expert',
+            description: 'Get professional advice for unclear symptoms',
+            urgency: 'medium',
+            estimated_cost: 'Medium',
+            local_availability: 'Agricultural extension services'
+          }
+        ]
+      };
+    }
+
+    // Disease-specific recommendations
+    const diseaseRecommendations = this.getDiseaseRecommendations(primaryDiseaseCode);
+    return diseaseRecommendations;
+  }
+
+  /**
+   * Get disease-specific treatment recommendations
+   */
+  getDiseaseRecommendations(diseaseCode) {
+    const recommendations = {
+      'CSSVD': {
+        immediate: [
+          {
+            title: 'Remove infected plants',
+            description: 'Immediately remove and destroy infected plants to prevent spread',
+            urgency: 'high',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          },
+          {
+            title: 'Apply insecticide',
+            description: 'Control whitefly vectors with approved insecticides',
+            urgency: 'high',
+            estimated_cost: 'Medium',
+            local_availability: 'Agricultural stores'
+          }
+        ],
+        preventive: [
+          {
+            title: 'Use resistant varieties',
+            description: 'Plant cassava varieties resistant to mosaic virus',
+            urgency: 'high',
+            estimated_cost: 'Low',
+            local_availability: 'Agricultural centers'
+          }
+        ],
+        longTerm: [
+          {
+            title: 'Crop rotation',
+            description: 'Rotate with non-host crops to break disease cycle',
+            urgency: 'medium',
+            estimated_cost: 'Low',
+            local_availability: 'Always available'
+          }
+        ]
+      },
+      'CMD': {
+        immediate: [
+          {
+            title: 'Remove infected plants',
+            description: 'Remove and destroy plants showing mosaic symptoms',
+            urgency: 'high',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        preventive: [
+          {
+            title: 'Use clean planting material',
+            description: 'Only use disease-free cassava cuttings',
+            urgency: 'high',
+            estimated_cost: 'Low',
+            local_availability: 'Certified nurseries'
+          }
+        ],
+        longTerm: [
+          {
+            title: 'Plant resistant varieties',
+            description: 'Switch to CMD-resistant cassava varieties',
+            urgency: 'high',
+            estimated_cost: 'Low',
+            local_availability: 'Agricultural research centers'
+          }
+        ]
+      },
+      'ANT': {
+        immediate: [
+          {
+            title: 'Apply fungicide',
+            description: 'Use copper-based fungicide to control anthracnose',
+            urgency: 'high',
+            estimated_cost: 'Medium',
+            local_availability: 'Agricultural stores'
+          },
+          {
+            title: 'Remove affected parts',
+            description: 'Prune and dispose of infected plant parts',
+            urgency: 'high',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        preventive: [
+          {
+            title: 'Improve air circulation',
+            description: 'Space plants properly and prune for better airflow',
+            urgency: 'medium',
+            estimated_cost: 'Free',
+            local_availability: 'Always available'
+          }
+        ],
+        longTerm: [
+          {
+            title: 'Drainage improvement',
+            description: 'Ensure good field drainage to reduce humidity',
+            urgency: 'medium',
+            estimated_cost: 'Medium',
+            local_availability: 'Local contractors'
+          }
+        ]
+      }
+    };
+
+    // Default recommendations for unknown diseases
+    const defaultRecommendations = {
+      immediate: [
+        {
+          title: 'Isolate affected plants',
+          description: 'Separate diseased plants from healthy ones',
+          urgency: 'high',
+          estimated_cost: 'Free',
+          local_availability: 'Always available'
+        },
+        {
+          title: 'Apply broad-spectrum treatment',
+          description: 'Use general fungicide or bactericide as appropriate',
+          urgency: 'medium',
+          estimated_cost: 'Medium',
+          local_availability: 'Agricultural stores'
+        }
+      ],
+      preventive: [
+        {
+          title: 'Improve plant hygiene',
+          description: 'Remove fallen leaves and debris regularly',
+          urgency: 'medium',
+          estimated_cost: 'Free',
+          local_availability: 'Always available'
+        }
+      ],
+      longTerm: [
+        {
+          title: 'Consult agricultural expert',
+          description: 'Get professional diagnosis and treatment plan',
+          urgency: 'high',
+          estimated_cost: 'Medium',
+          local_availability: 'Agricultural extension services'
+        }
+      ]
+    };
+
+    return recommendations[diseaseCode] || defaultRecommendations;
+  }
+
+  /**
+   * Helper methods for formatting API responses (legacy support)
+   */
+  determineSeverity(apiResponse) {
+    const confidence = apiResponse.confidence || 0;
+    const diseaseCount = (apiResponse.diseases || []).length;
+    
+    if (confidence > 0.8 && diseaseCount > 0) return 'high';
+    if (confidence > 0.6 || diseaseCount > 0) return 'medium';
+    return 'low';
+  }
+
+  determineHealthStatus(apiResponse) {
+    const diseases = apiResponse.diseases || [];
+    const pests = apiResponse.pests || [];
+    
+    if (diseases.length === 0 && pests.length === 0) return 'excellent';
+    if (diseases.length <= 1 && pests.length <= 1) return 'good';
+    if (diseases.length <= 2 && pests.length <= 2) return 'fair';
+    return 'poor';
+  }
+
+  formatDiseases(diseases) {
+    return diseases.map(disease => ({
+      name: disease.name || disease.disease_name,
+      confidence: disease.confidence || 0.8,
+      severity: disease.severity || 'medium',
+      description: disease.description || '',
+      treatment: disease.treatment || []
+    }));
+  }
+
+  formatPests(pests) {
+    return pests.map(pest => ({
+      name: pest.name || pest.pest_name,
+      confidence: pest.confidence || 0.8,
+      severity: pest.severity || 'medium',
+      description: pest.description || '',
+      treatment: pest.treatment || []
+    }));
+  }
+
+  formatDeficiencies(deficiencies) {
+    return deficiencies.map(def => ({
+      nutrient: def.nutrient || def.name,
+      confidence: def.confidence || 0.8,
+      severity: def.severity || 'medium',
+      symptoms: def.symptoms || [],
+      treatment: def.treatment || []
+    }));
+  }
+
+  formatEnvironmentalStress(factors) {
+    return factors.map(factor => ({
+      type: factor.type || factor.stress_type,
+      confidence: factor.confidence || 0.8,
+      severity: factor.severity || 'medium',
+      description: factor.description || '',
+      solutions: factor.solutions || []
+    }));
+  }
+
+  formatRecommendations(recommendations) {
+    return recommendations.map(rec => {
+      if (typeof rec === 'string') {
+        return {
+          title: rec,
+          description: rec,
+          urgency: 'medium',
+          estimated_cost: 'Low',
+          local_availability: 'Common'
+        };
+      }
+      return {
+        title: rec.title || rec.action,
+        description: rec.description || rec.details,
+        urgency: rec.urgency || rec.priority || 'medium',
+        estimated_cost: rec.cost || 'Medium',
+        local_availability: rec.availability || 'Common'
+      };
+    });
+  }
+
+  /**
+   * Generate enhanced mock diagnosis result with realistic data
+   */
+  generateEnhancedMockDiagnosisResult(cropType, imagePath) {
+    const scenarios = [
+      {
+        primaryIssue: 'Healthy Plant Detected',
+        severity: 'low',
+        confidence: 92,
+        plantHealth: 'excellent',
+        diseases: [],
+        pests: [],
+        recommendations: {
+          immediate: [
+            { title: 'Continue current care routine', description: 'Your plant looks healthy! Keep up the good work.', urgency: 'low' }
+          ],
+          preventive: [
+            { title: 'Regular monitoring', description: 'Check plants weekly for early signs of issues', urgency: 'low' },
+            { title: 'Maintain soil moisture', description: 'Ensure consistent watering schedule', urgency: 'low' }
+          ],
+          longTerm: [
+            { title: 'Soil testing', description: 'Test soil pH and nutrients annually', urgency: 'low' }
+          ]
+        }
+      },
+      {
+        primaryIssue: 'Early Blight Detected',
+        severity: 'medium',
+        confidence: 87,
+        plantHealth: 'fair',
+        diseases: [
+          {
+            name: 'Early Blight',
+            confidence: 87,
+            severity: 'medium',
+            description: 'Fungal disease causing brown spots with concentric rings on leaves'
+          }
+        ],
+        pests: [],
+        recommendations: {
+          immediate: [
+            { title: 'Apply fungicide', description: 'Use copper-based fungicide immediately', urgency: 'high' },
+            { title: 'Remove affected leaves', description: 'Prune and dispose of infected foliage', urgency: 'high' }
+          ],
+          preventive: [
+            { title: 'Improve air circulation', description: 'Space plants properly and prune for airflow', urgency: 'medium' },
+            { title: 'Avoid overhead watering', description: 'Water at soil level to keep leaves dry', urgency: 'medium' }
+          ],
+          longTerm: [
+            { title: 'Crop rotation', description: 'Rotate crops next season to break disease cycle', urgency: 'low' }
+          ]
+        }
+      },
+      {
+        primaryIssue: 'Nutrient Deficiency - Nitrogen',
+        severity: 'medium',
+        confidence: 79,
+        plantHealth: 'fair',
+        diseases: [],
+        pests: [],
+        deficiencies: [
+          {
+            nutrient: 'Nitrogen',
+            confidence: 79,
+            severity: 'medium',
+            symptoms: ['Yellowing of older leaves', 'Stunted growth', 'Pale green coloration']
+          }
+        ],
+        recommendations: {
+          immediate: [
+            { title: 'Apply nitrogen fertilizer', description: 'Use balanced NPK fertilizer (10-10-10)', urgency: 'high' },
+            { title: 'Increase watering frequency', description: 'Ensure nutrients can be absorbed', urgency: 'medium' }
+          ],
+          preventive: [
+            { title: 'Regular soil testing', description: 'Test soil nutrients monthly during growing season', urgency: 'medium' },
+            { title: 'Organic matter addition', description: 'Add compost to improve soil fertility', urgency: 'low' }
+          ],
+          longTerm: [
+            { title: 'Soil improvement plan', description: 'Develop long-term soil health strategy', urgency: 'low' }
+          ]
+        }
+      }
+    ];
+
+    // Select scenario based on crop type and add some randomness
+    const scenarioIndex = Math.floor(Math.random() * scenarios.length);
+    const selectedScenario = scenarios[scenarioIndex];
+
+    // Add some variation to confidence
+    const confidenceVariation = (Math.random() - 0.5) * 10;
+    selectedScenario.confidence = Math.max(60, Math.min(95, selectedScenario.confidence + confidenceVariation));
+
+    return {
+      confidence: selectedScenario.confidence,
+      primaryIssue: selectedScenario.primaryIssue,
+      severity: selectedScenario.severity,
+      plantInfo: {
+        cropType: cropType || 'unknown',
+        plantStage: 'maturation',
+        plantHealth: selectedScenario.plantHealth
+      },
+      diseases: selectedScenario.diseases || [],
+      pests: selectedScenario.pests || [],
+      deficiencies: selectedScenario.deficiencies || [],
+      environmentalStress: selectedScenario.environmentalStress || [],
+      recommendations: selectedScenario.recommendations,
+      metadata: {
+        analysisDate: new Date(),
+        apiVersion: '1.0',
+        model: 'AgriSphere-MockAI',
+        processingTime: `${(Math.random() * 2 + 1).toFixed(1)} seconds`
+      }
+    };
   }
 
   /**

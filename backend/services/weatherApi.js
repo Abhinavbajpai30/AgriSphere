@@ -22,6 +22,9 @@ class WeatherApiService {
    * Transform OpenEPI weather response to expected format
    */
   transformWeatherData(openEpiResponse, location) {
+    // Handle both flat structure and nested current structure
+    const currentData = openEpiResponse.current || openEpiResponse;
+    
     return {
       location: {
         lat: location.lat,
@@ -30,19 +33,19 @@ class WeatherApiService {
         country: openEpiResponse.location?.country || 'Unknown'
       },
       current: {
-        temperature: openEpiResponse.temperature || openEpiResponse.temp,
-        feelsLike: openEpiResponse.feels_like || openEpiResponse.apparent_temperature,
-        humidity: openEpiResponse.humidity || openEpiResponse.relative_humidity,
-        pressure: openEpiResponse.pressure || openEpiResponse.surface_pressure,
-        visibility: openEpiResponse.visibility,
-        windSpeed: openEpiResponse.wind_speed || openEpiResponse.wind?.speed,
-        windDirection: openEpiResponse.wind_direction || openEpiResponse.wind?.direction,
-        cloudiness: openEpiResponse.cloud_cover || openEpiResponse.cloudiness,
-        description: openEpiResponse.weather_description || openEpiResponse.description,
-        icon: openEpiResponse.weather_icon || openEpiResponse.icon,
-        uvIndex: openEpiResponse.uv_index,
-        dewPoint: openEpiResponse.dew_point,
-        precipitation: openEpiResponse.precipitation
+        temperature: currentData.temperature || currentData.temp || null,
+        feelsLike: currentData.feelsLike || currentData.feels_like || currentData.apparent_temperature,
+        humidity: currentData.humidity || currentData.relative_humidity,
+        pressure: currentData.pressure || currentData.surface_pressure,
+        visibility: currentData.visibility,
+        windSpeed: currentData.windSpeed || currentData.wind_speed || currentData.wind?.speed,
+        windDirection: currentData.windDirection || currentData.wind_direction || currentData.wind?.direction,
+        cloudiness: currentData.cloudiness || currentData.cloud_cover,
+        description: currentData.description || currentData.weather_description,
+        icon: currentData.icon || currentData.weather_icon,
+        uvIndex: currentData.uvIndex || currentData.uv_index,
+        dewPoint: currentData.dewPoint || currentData.dew_point,
+        precipitation: currentData.precipitation
       },
       timestamp: new Date().toISOString(),
       source: 'OpenEPI'
@@ -65,20 +68,20 @@ class WeatherApiService {
       forecast: forecast.map(day => ({
         date: day.date || day.datetime,
         temperature: {
-          min: day.temp_min || day.temperature?.min,
-          max: day.temp_max || day.temperature?.max,
+          min: day.temp_min || day.temperature?.min || day.low,
+          max: day.temp_max || day.temperature?.max || day.high,
           avg: day.temp_avg || day.temperature?.avg
         },
         humidity: day.humidity || day.relative_humidity,
         pressure: day.pressure || day.surface_pressure,
-        windSpeed: day.wind_speed || day.wind?.speed,
-        windDirection: day.wind_direction || day.wind?.direction,
-        cloudiness: day.cloud_cover || day.cloudiness,
+        windSpeed: day.windSpeed || day.wind_speed || day.wind?.speed,
+        windDirection: day.windDirection || day.wind_direction || day.wind?.direction,
+        cloudiness: day.cloudiness || day.cloud_cover,
         precipitation: day.precipitation || day.precip,
-        precipitationProbability: day.precipitation_probability || day.precip_prob,
-        description: day.weather_description || day.description,
-        icon: day.weather_icon || day.icon,
-        uvIndex: day.uv_index
+        precipitationProbability: day.precipitationProbability || day.precipitation_probability || day.precip_prob,
+        description: day.description || day.weather_description,
+        icon: day.icon || day.weather_icon,
+        uvIndex: day.uvIndex || day.uv_index
       })),
       timestamp: new Date().toISOString(),
       source: 'OpenEPI'
@@ -94,10 +97,14 @@ class WeatherApiService {
         throw new ApiError('Latitude and longitude are required', 400);
       }
 
+      logger.info('Getting current weather from OpenEPI', { lat, lon });
+
       const response = await this.openEpi.getWeatherData(lat, lon, {
         cacheTTL: this.weatherCacheTTL
       });
       
+      logger.info('OpenEPI response received', { response: typeof response });
+
       const weatherData = this.transformWeatherData(response, { lat, lon });
 
       logger.info('Current weather data retrieved successfully via OpenEPI', { lat, lon });

@@ -1,328 +1,774 @@
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  CalendarDaysIcon,
-  ChartBarIcon,
-  LightBulbIcon,
-  ArrowPathIcon
-} from '@heroicons/react/24/outline'
+  SparklesIcon,
+  TrendingUpIcon,
+  CalendarIcon,
+  MapPinIcon,
+  StarIcon,
+  ChevronRightIcon,
+  ChevronLeftIcon,
+  SproutIcon,
+  CoinsIcon,
+  ShieldCheckIcon,
+  AlertTriangleIcon,
+  ThumbsUpIcon,
+  ThumbsDownIcon,
+  ClockIcon,
+  DollarSignIcon,
+  CheckCircleIcon
+} from 'lucide-react';
+import apiService, { farmApi } from '../../services/api';
+import PlantGrowthAnimation from '../../components/Common/PlantGrowthAnimation';
 
 const CropPlanning = () => {
-  const [selectedView, setSelectedView] = useState('calendar')
-  const [selectedSeason, setSelectedSeason] = useState('current')
+  const [currentStep, setCurrentStep] = useState('overview');
+  const [selectedFarm, setSelectedFarm] = useState(null);
+  const [recommendations, setRecommendations] = useState(null);
+  const [selectedCrop, setSelectedCrop] = useState(null);
+  const [cropComparison, setCropComparison] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hoveredCrop, setHoveredCrop] = useState(null);
+  const [farms, setFarms] = useState([]);
+  const [farmsLoading, setFarmsLoading] = useState(true);
+  const [userPreferences, setUserPreferences] = useState({
+    experience: 'intermediate',
+    budget: 'medium',
+    marketAccess: 'local',
+    riskTolerance: 'medium'
+  });
 
-  const seasons = [
-    { id: 'current', label: 'Current Season', period: 'Jan - Apr 2024' },
-    { id: 'next', label: 'Next Season', period: 'May - Aug 2024' },
-    { id: 'annual', label: 'Annual Plan', period: '2024 Overview' }
-  ]
+  // Fetch farms from API
+  useEffect(() => {
+    const fetchFarms = async () => {
+      setFarmsLoading(true);
+      try {
+        const response = await farmApi.getFarms();
+        console.log('Farm API response:', response.data);
+        
+        if (response.data && response.data.data && response.data.data.farms && response.data.data.farms.length > 0) {
+          console.log('Found farms:', response.data.data.farms.length);
+          // Transform farm data to match the expected format
+          const transformedFarms = response.data.data.farms.map(farm => ({
+            id: farm._id,
+            name: farm.farmInfo.name,
+            size: farm.farmInfo.totalArea.value,
+            location: farm.location.address,
+            soilType: farm.fields?.[0]?.soilType || 'Unknown',
+            farmType: farm.farmInfo.farmType,
+            coordinates: farm.location.centerPoint.coordinates
+          }));
+          console.log('Transformed farms:', transformedFarms);
+          setFarms(transformedFarms);
+        } else {
+          console.log('No farms found in API response, using mock data');
+          // Fallback to mock data if no farms found
+          setFarms([
+            { id: '1', name: 'North Field', size: 2.5, location: 'Punjab, India', soilType: 'Clay Loam' },
+            { id: '2', name: 'South Plot', size: 1.8, location: 'Haryana, India', soilType: 'Sandy Loam' },
+            { id: '3', name: 'East Garden', size: 0.5, location: 'UP, India', soilType: 'Loam' }
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching farms:', error);
+        // Fallback to mock data if API fails
+        setFarms([
+          { id: '1', name: 'North Field', size: 2.5, location: 'Punjab, India', soilType: 'Clay Loam' },
+          { id: '2', name: 'South Plot', size: 1.8, location: 'Haryana, India', soilType: 'Sandy Loam' },
+          { id: '3', name: 'East Garden', size: 0.5, location: 'UP, India', soilType: 'Loam' }
+        ]);
+      } finally {
+        setFarmsLoading(false);
+      }
+    };
 
-  const cropCalendar = [
-    {
-      crop: 'Tomatoes',
-      emoji: '🍅',
-      planted: '2024-01-15',
-      harvest: '2024-04-15',
-      status: 'growing',
-      progress: 65
-    },
-    {
-      crop: 'Maize',
-      emoji: '🌽',
-      planted: '2024-02-01',
-      harvest: '2024-05-01',
-      status: 'growing',
-      progress: 45
-    },
-    {
-      crop: 'Beans',
-      emoji: '🫘',
-      planted: '2024-03-01',
-      harvest: '2024-05-15',
-      status: 'planned',
-      progress: 0
+    fetchFarms();
+  }, []);
+
+  useEffect(() => {
+    if (selectedFarm) {
+      fetchCropRecommendations();
     }
-  ]
+  }, [selectedFarm, userPreferences]);
 
-  const rotationPlan = [
-    { field: 'Field A', current: 'Tomatoes', next: 'Beans', benefit: 'Nitrogen fixation' },
-    { field: 'Field B', current: 'Maize', next: 'Cassava', benefit: 'Soil recovery' },
-    { field: 'Field C', current: 'Fallow', next: 'Tomatoes', benefit: 'Pest control' }
-  ]
-
-  const recommendations = [
-    {
-      type: 'planting',
-      title: 'Optimal Planting Window',
-      description: 'Best time to plant beans is in the next 2 weeks for optimal yield.',
+  const fetchCropRecommendations = async () => {
+    if (!selectedFarm) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await apiService.post('/planning/recommendations', {
+        farmId: selectedFarm.id,
+        ...userPreferences
+      });
+      setRecommendations(response.data.message);
+    } catch (error) {
+      console.error('Error fetching recommendations:', error);
+      // Use mock data for demo
+      setRecommendations({
+        topRecommendations: [
+          {
+            cropKey: 'tomato',
+            name: 'Tomato',
+            image: '/images/crops/tomato.jpg',
+            overallScore: 85,
+            recommendation: 'highly_recommended',
+            profitProjection: { profit: 45000, margin: 60, roi: '180%' },
+            growing: { duration: 90, difficulty: 'medium' },
+            waterRequirement: { total: 600, irrigationNeeded: 400 },
+            bestPlantingTime: 'Plant now',
+            benefits: ['High market demand', 'Multiple harvests possible', 'Rich in vitamins'],
+            challenges: ['Pest susceptible', 'Regular watering needed', 'Temperature sensitive'],
+            riskFactors: { drought: 'high', pest: 'high', market: 'low' }
+          },
+          {
+            cropKey: 'corn',
+            name: 'Corn (Maize)',
+            image: '/images/crops/corn.jpg',
+            overallScore: 78,
+            recommendation: 'recommended',
+            profitProjection: { profit: 32000, margin: 45, roi: '140%' },
+            growing: { duration: 120, difficulty: 'easy' },
+            waterRequirement: { total: 500, irrigationNeeded: 300 },
+            bestPlantingTime: 'Best time: Apr',
+            benefits: ['Stable market', 'Drought tolerant varieties', 'Multiple uses'],
+            challenges: ['Large planting area needed', 'Storage challenges', 'Wind vulnerable'],
+            riskFactors: { drought: 'medium', pest: 'medium', market: 'low' }
+          },
+          {
+            cropKey: 'potato',
+            name: 'Potato',
+            image: '/images/crops/potato.jpg',
+            overallScore: 72,
+            recommendation: 'suitable_with_care',
+            profitProjection: { profit: 28000, margin: 55, roi: '120%' },
+            growing: { duration: 75, difficulty: 'easy' },
+            waterRequirement: { total: 400, irrigationNeeded: 250 },
+            bestPlantingTime: 'Best time: Nov',
+            benefits: ['Short growing season', 'High yield potential', 'Good storage life'],
+            challenges: ['Disease susceptible', 'Quality seed needed', 'Price volatility'],
+            riskFactors: { drought: 'medium', pest: 'medium', market: 'medium' }
+          }
+        ],
+        seasonalCalendar: {
+          spring: {
+            months: ['March', 'April', 'May'],
+            recommendedCrops: [
+              { name: 'Tomato', duration: 90, expectedYield: 25000, score: 85 }
+            ]
+          },
+          summer: {
+            months: ['June', 'July', 'August'],
+            recommendedCrops: [
+              { name: 'Corn', duration: 120, expectedYield: 8000, score: 78 }
+            ]
+          }
+        },
+        climateAdaptation: [
+          {
+            risk: 'High Temperature',
+            impact: 'Heat stress on crops',
       priority: 'high',
-      emoji: '🌱'
-    },
-    {
-      type: 'rotation',
-      title: 'Crop Rotation Suggestion',
-      description: 'Consider rotating tomatoes with legumes to improve soil nitrogen.',
-      priority: 'medium',
-      emoji: '🔄'
-    },
-    {
-      type: 'harvest',
-      title: 'Harvest Planning',
-      description: 'Tomato harvest expected in 6 weeks. Plan storage and market timing.',
-      priority: 'medium',
-      emoji: '📦'
+            strategies: ['Use heat-tolerant varieties', 'Adjust planting dates'],
+            affectedCrops: ['Tomato', 'Potato']
+          }
+        ]
+      });
+    } finally {
+      setIsLoading(false);
     }
-  ]
+  };
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
+  const getRecommendationBadge = (recommendation) => {
+    switch (recommendation) {
+      case 'highly_recommended':
+        return { text: 'Highly Recommended', color: 'bg-green-500', icon: '⭐' };
+      case 'recommended':
+        return { text: 'Recommended', color: 'bg-blue-500', icon: '👍' };
+      case 'suitable_with_care':
+        return { text: 'Suitable with Care', color: 'bg-yellow-500', icon: '⚠️' };
+      default:
+        return { text: 'Not Recommended', color: 'bg-red-500', icon: '❌' };
     }
-  }
+  };
 
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: {
-      y: 0,
-      opacity: 1,
-      transition: {
-        type: 'spring',
-        stiffness: 100
-      }
+  const getDifficultyColor = (difficulty) => {
+    switch (difficulty) {
+      case 'easy': return 'text-green-600 bg-green-100';
+      case 'medium': return 'text-yellow-600 bg-yellow-100';
+      case 'hard': return 'text-red-600 bg-red-100';
+      default: return 'text-gray-600 bg-gray-100';
     }
-  }
+  };
+
+  const CropCard = ({ crop, index, isHovered, onHover, onSelect }) => {
+    const badge = getRecommendationBadge(crop.recommendation);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 safe-top">
       <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="max-w-6xl mx-auto px-4 py-6"
+        initial={{ opacity: 0, y: 50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: index * 0.1 }}
+        whileHover={{ scale: 1.05, y: -10 }}
+        onHoverStart={() => onHover(crop)}
+        onHoverEnd={() => onHover(null)}
+        onClick={() => onSelect(crop)}
+        className="relative cursor-pointer group"
       >
-        {/* Header */}
-        <motion.div variants={itemVariants} className="text-center mb-8">
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2">
-            Crop Planning 📅
-          </h1>
-          <p className="text-gray-600">
-            Plan your seasons, optimize rotations, and maximize yields
-          </p>
-        </motion.div>
-
-        {/* Season Selector */}
-        <motion.div variants={itemVariants} className="flex justify-center mb-8">
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-2 shadow-soft">
-            <div className="flex space-x-2">
-              {seasons.map((season) => (
-                <button
-                  key={season.id}
-                  onClick={() => setSelectedSeason(season.id)}
-                  className={`
-                    px-4 py-3 rounded-xl transition-all duration-200 text-sm
-                    ${selectedSeason === season.id 
-                      ? 'bg-primary-500 text-white shadow-glow' 
-                      : 'hover:bg-primary-50 text-gray-600'
-                    }
-                  `}
-                >
-                  <div className="font-medium">{season.label}</div>
-                  <div className="text-xs opacity-80">{season.period}</div>
-                </button>
-              ))}
+        <div className="bg-white rounded-3xl overflow-hidden shadow-xl border border-white/40 h-80">
+          {/* Crop Image */}
+          <div className="relative h-48 bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden">
+            {isHovered ? (
+              <PlantGrowthAnimation 
+                isActive={true}
+                cropType={crop.cropKey}
+                size="medium"
+              />
+            ) : (
+              <SproutIcon className="w-24 h-24 text-white opacity-80" />
+            )}
+            <div className="absolute top-4 right-4">
+              <div className={`${badge.color} text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center space-x-1`}>
+                <span>{badge.icon}</span>
+                <span>{crop.overallScore}</span>
+              </div>
+            </div>
+            <div className="absolute bottom-4 left-4">
+              <span className="bg-white/20 backdrop-blur-sm text-white px-3 py-1 rounded-full text-sm font-semibold">
+                {crop.bestPlantingTime}
+              </span>
             </div>
           </div>
-        </motion.div>
 
-        {/* View Toggle */}
-        <motion.div variants={itemVariants} className="flex justify-center mb-8">
-          <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-1 shadow-soft">
-            <div className="flex space-x-1">
-              {[
-                { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
-                { id: 'rotation', label: 'Rotation', icon: ArrowPathIcon },
-                { id: 'analytics', label: 'Analytics', icon: ChartBarIcon }
-              ].map((view) => (
-                <button
-                  key={view.id}
-                  onClick={() => setSelectedView(view.id)}
-                  className={`
-                    flex items-center space-x-2 px-4 py-2 rounded-xl transition-all duration-200
-                    ${selectedView === view.id 
-                      ? 'bg-white text-primary-600 shadow-soft' 
-                      : 'hover:bg-white/50 text-gray-600'
-                    }
-                  `}
-                >
-                  <view.icon className="w-4 h-4" />
-                  <span className="text-sm font-medium">{view.label}</span>
-                </button>
-              ))}
+          {/* Crop Info */}
+          <div className="p-6">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">{crop.name}</h3>
+            
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <CoinsIcon className="w-4 h-4 text-yellow-500" />
+                <span className="text-sm font-semibold text-gray-700">₹{crop.profitProjection.profit.toLocaleString()}</span>
+              </div>
+              <div className={`px-2 py-1 rounded-full text-xs font-semibold ${getDifficultyColor(crop.growing.difficulty)}`}>
+                {crop.growing.difficulty}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-gray-600">
+              <span className="flex items-center space-x-1">
+                <ClockIcon className="w-4 h-4" />
+                <span>{crop.growing.duration} days</span>
+              </span>
+              <span className="flex items-center space-x-1">
+                <TrendingUpIcon className="w-4 h-4" />
+                <span>{crop.profitProjection.roi}</span>
+              </span>
             </div>
           </div>
-        </motion.div>
 
-        {/* Content Area */}
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-2">
-            {selectedView === 'calendar' && (
-              <motion.div variants={itemVariants} className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4">Crop Calendar</h2>
-                {cropCalendar.map((crop, index) => (
-                  <div key={crop.crop} className="card">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-3xl">{crop.emoji}</div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="font-semibold text-gray-800">{crop.crop}</h3>
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                            crop.status === 'growing' ? 'bg-green-100 text-green-800' :
-                            crop.status === 'planned' ? 'bg-blue-100 text-blue-800' :
-                            'bg-orange-100 text-orange-800'
-                          }`}>
-                            {crop.status}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-sm text-gray-600 mb-3">
-                          <div>
-                            <span className="font-medium">Planted:</span> {crop.planted}
-                          </div>
-                          <div>
-                            <span className="font-medium">Harvest:</span> {crop.harvest}
-                          </div>
-                        </div>
-                        {crop.status === 'growing' && (
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span>Growth Progress</span>
-                              <span>{crop.progress}%</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${crop.progress}%` }}
-                                transition={{ delay: index * 0.2, duration: 1 }}
-                                className="bg-gradient-primary h-2 rounded-full"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+          {/* Hover Overlay */}
+          <AnimatePresence>
+            {isHovered && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/80 flex items-center justify-center p-6"
+              >
+                <div className="text-center text-white">
+                  <h4 className="text-lg font-bold mb-3">Quick Preview</h4>
+                  <div className="space-y-2 text-sm">
+                    <div>Duration: {crop.growing.duration} days</div>
+                    <div>Profit Margin: {crop.profitProjection.margin}%</div>
+                    <div>Water Need: {crop.waterRequirement.total}mm</div>
                   </div>
-                ))}
-              </motion.div>
-            )}
-
-            {selectedView === 'rotation' && (
-              <motion.div variants={itemVariants} className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4">Rotation Plan</h2>
-                {rotationPlan.map((rotation) => (
-                  <div key={rotation.field} className="card">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-2xl">🔄</div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-800 mb-2">{rotation.field}</h3>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600 mb-2">
-                          <div>
-                            <span className="font-medium">Current:</span> {rotation.current}
-                          </div>
-                          <span>→</span>
-                          <div>
-                            <span className="font-medium">Next:</span> {rotation.next}
-                          </div>
-                        </div>
-                        <div className="text-sm text-green-600">
-                          💡 Benefit: {rotation.benefit}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </motion.div>
-            )}
-
-            {selectedView === 'analytics' && (
-              <motion.div variants={itemVariants} className="text-center py-16">
-                <div className="text-6xl mb-4">📊</div>
-                <h3 className="text-xl font-semibold text-gray-800 mb-2">Analytics Dashboard</h3>
-                <p className="text-gray-600 mb-6">
-                  Detailed crop performance analytics coming soon
-                </p>
-                <button className="btn-primary">
-                  View Crop Performance
-                </button>
-              </motion.div>
-            )}
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* AI Recommendations */}
-            <motion.div variants={itemVariants}>
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">AI Recommendations</h2>
-              <div className="space-y-3">
-                {recommendations.map((rec, index) => (
-                  <div key={index} className="card">
-                    <div className="flex items-start space-x-3">
-                      <div className="text-xl">{rec.emoji}</div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <h4 className="font-semibold text-gray-800 text-sm">{rec.title}</h4>
-                          <span className={`w-2 h-2 rounded-full ${
-                            rec.priority === 'high' ? 'bg-red-400' : 'bg-orange-400'
-                          }`} />
-                        </div>
-                        <p className="text-xs text-gray-600">{rec.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-
-            {/* Quick Actions */}
-            <motion.div variants={itemVariants}>
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h2>
-              <div className="space-y-3">
-                <button className="w-full btn-primary flex items-center justify-center space-x-2">
-                  <CalendarDaysIcon className="w-4 h-4" />
-                  <span>Plan New Season</span>
-                </button>
-                <button className="w-full btn-outline flex items-center justify-center space-x-2">
-                  <ArrowPathIcon className="w-4 h-4" />
-                  <span>Set Rotation Schedule</span>
-                </button>
-                <button className="w-full btn-outline flex items-center justify-center space-x-2">
-                  <LightBulbIcon className="w-4 h-4" />
-                  <span>Get AI Suggestions</span>
-                </button>
-              </div>
-            </motion.div>
-
-            {/* Seasonal Tips */}
-            <motion.div variants={itemVariants}>
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">Seasonal Tips</h2>
-              <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-                <div className="text-center">
-                  <div className="text-2xl mb-2">🌱</div>
-                  <h4 className="font-semibold text-gray-800 text-sm mb-2">Spring Planting</h4>
-                  <p className="text-xs text-gray-600">
-                    Perfect time for warm-season crops. Soil temperature should be above 15°C for optimal germination.
-                  </p>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="mt-4 bg-white text-black px-4 py-2 rounded-full text-sm font-semibold"
+                  >
+                    View Details
+                  </motion.button>
                 </div>
-              </div>
-            </motion.div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
-    </div>
-  )
-}
+    );
+  };
 
-export default CropPlanning
+  const renderFarmSelection = () => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 p-6"
+    >
+      <div className="max-w-6xl mx-auto">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-12"
+        >
+          <div className="flex items-center justify-center space-x-3 mb-4">
+            <motion.div
+              animate={{ rotate: [0, 360] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+              className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center"
+            >
+              <SparklesIcon className="w-8 h-8 text-white" />
+            </motion.div>
+            <h1 className="text-4xl font-bold text-gray-800">Climate-Smart Planner</h1>
+          </div>
+          <p className="text-xl text-gray-600">AI-powered crop recommendations for changing climate conditions</p>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {farmsLoading ? (
+            // Loading state
+            Array.from({ length: 3 }).map((_, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                className="bg-white rounded-3xl p-8 shadow-xl border border-white/40"
+              >
+                <div className="animate-pulse">
+                  <div className="h-8 bg-gray-200 rounded mb-6"></div>
+                  <div className="space-y-4">
+                    <div className="h-4 bg-gray-200 rounded"></div>
+                    <div className="h-4 bg-gray-200 rounded"></div>
+                    <div className="h-4 bg-gray-200 rounded"></div>
+                  </div>
+                  <div className="mt-6 h-12 bg-gray-200 rounded-xl"></div>
+                </div>
+              </motion.div>
+            ))
+          ) : farms.length === 0 ? (
+            // Empty state
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="col-span-full text-center py-12"
+            >
+              <div className="bg-white rounded-3xl p-8 shadow-xl border border-white/40">
+                <SproutIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-2xl font-bold text-gray-800 mb-2">No Farms Found</h3>
+                <p className="text-gray-600 mb-6">You haven't created any farms yet. Create your first farm to get started with crop recommendations.</p>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-xl font-semibold"
+                >
+                  Create Your First Farm
+                </motion.button>
+              </div>
+            </motion.div>
+          ) : (
+            // Farm cards
+            farms.map((farm, index) => (
+              <motion.div
+                key={farm.id}
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                whileHover={{ scale: 1.02, y: -5 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => {
+                  setSelectedFarm(farm);
+                  setCurrentStep('preferences');
+                }}
+                className="bg-white rounded-3xl p-8 shadow-xl border border-white/40 cursor-pointer hover:shadow-2xl transition-all duration-300"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-2xl font-bold text-gray-800">{farm.name}</h3>
+                  <MapPinIcon className="w-6 h-6 text-green-500" />
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Size:</span>
+                    <span className="font-semibold text-gray-800">{farm.size} hectares</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Location:</span>
+                    <span className="font-semibold text-green-600">{farm.location}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Soil Type:</span>
+                    <span className="font-semibold text-gray-800">{farm.soilType}</span>
+                  </div>
+                  {farm.farmType && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Type:</span>
+                      <span className="font-semibold text-gray-800 capitalize">{farm.farmType.replace('_', ' ')}</span>
+                    </div>
+                  )}
+                </div>
+
+                <motion.div
+                  className="mt-6 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-center py-3 rounded-xl font-semibold"
+                  whileHover={{ from: 'from-emerald-500', to: 'to-green-500' }}
+                >
+                  Get Crop Recommendations
+                </motion.div>
+              </motion.div>
+            ))
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const renderPreferences = () => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 p-6"
+    >
+      <div className="max-w-4xl mx-auto">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-12"
+        >
+          <h1 className="text-3xl font-bold text-gray-800 mb-4">Tell us about your preferences</h1>
+          <p className="text-xl text-gray-600">This helps us provide better crop recommendations</p>
+        </motion.div>
+
+        <div className="bg-white rounded-3xl p-8 shadow-xl border border-white/40">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Experience Level */}
+            <div>
+              <label className="block text-lg font-semibold text-gray-800 mb-4">Experience Level</label>
+              <div className="space-y-3">
+                {['beginner', 'intermediate', 'expert'].map((level) => (
+                  <motion.div
+                    key={level}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setUserPreferences(prev => ({ ...prev, experience: level }))}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      userPreferences.experience === level
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 hover:border-green-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold capitalize">{level}</span>
+                      {userPreferences.experience === level && (
+                        <StarIcon className="w-5 h-5 text-green-500" />
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* Budget */}
+            <div>
+              <label className="block text-lg font-semibold text-gray-800 mb-4">Budget Range</label>
+              <div className="space-y-3">
+                {['low', 'medium', 'high'].map((budget) => (
+                  <motion.div
+                    key={budget}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setUserPreferences(prev => ({ ...prev, budget }))}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      userPreferences.budget === budget
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 hover:border-green-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold capitalize">{budget}</span>
+                      {userPreferences.budget === budget && (
+                        <StarIcon className="w-5 h-5 text-green-500" />
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* Market Access */}
+            <div>
+              <label className="block text-lg font-semibold text-gray-800 mb-4">Market Access</label>
+              <div className="space-y-3">
+                {['local', 'regional', 'national', 'export'].map((market) => (
+                  <motion.div
+                    key={market}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setUserPreferences(prev => ({ ...prev, marketAccess: market }))}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      userPreferences.marketAccess === market
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 hover:border-green-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold capitalize">{market}</span>
+                      {userPreferences.marketAccess === market && (
+                        <StarIcon className="w-5 h-5 text-green-500" />
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* Risk Tolerance */}
+            <div>
+              <label className="block text-lg font-semibold text-gray-800 mb-4">Risk Tolerance</label>
+              <div className="space-y-3">
+                {['low', 'medium', 'high'].map((risk) => (
+                  <motion.div
+                    key={risk}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setUserPreferences(prev => ({ ...prev, riskTolerance: risk }))}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      userPreferences.riskTolerance === risk
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-200 hover:border-green-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold capitalize">{risk}</span>
+                      {userPreferences.riskTolerance === risk && (
+                        <StarIcon className="w-5 h-5 text-green-500" />
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between mt-8">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setCurrentStep('overview')}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold"
+            >
+              ← Back to Farms
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setCurrentStep('recommendations')}
+              className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl font-semibold"
+            >
+              Get Recommendations →
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const renderRecommendations = () => (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 p-6"
+    >
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between mb-8"
+        >
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">Crop Recommendations for {selectedFarm?.name}</h1>
+            <p className="text-gray-600 mt-2">Climate-smart suggestions based on your preferences</p>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setCurrentStep('preferences')}
+            className="px-6 py-3 bg-white rounded-xl shadow-lg border border-gray-200 text-gray-700 font-semibold"
+          >
+            ← Adjust Preferences
+          </motion.button>
+        </motion.div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center h-64">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              className="w-16 h-16 border-4 border-green-500 border-t-transparent rounded-full"
+            />
+          </div>
+        ) : (
+          <>
+            {/* Top 3 Recommendations */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-12"
+            >
+              <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center space-x-2">
+                <StarIcon className="w-6 h-6 text-yellow-500" />
+                <span>Top 3 Recommendations</span>
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {recommendations?.topRecommendations?.map((crop, index) => (
+                  <CropCard
+                    key={crop.cropKey}
+                    crop={crop}
+                    index={index}
+                    isHovered={hoveredCrop?.cropKey === crop.cropKey}
+                    onHover={setHoveredCrop}
+                    onSelect={setSelectedCrop}
+                  />
+                ))}
+                          </div>
+            </motion.div>
+
+            {/* Seasonal Calendar */}
+            {recommendations?.seasonalCalendar && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="mb-12"
+              >
+                <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center space-x-2">
+                  <CalendarIcon className="w-6 h-6 text-blue-500" />
+                  <span>Seasonal Planting Calendar</span>
+                </h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.entries(recommendations.seasonalCalendar).map(([season, data]) => (
+                    <motion.div
+                      key={season}
+                      whileHover={{ scale: 1.02 }}
+                      className="bg-white rounded-2xl p-6 shadow-lg border border-white/40"
+                    >
+                      <h3 className="text-xl font-bold text-gray-800 mb-4 capitalize">{season}</h3>
+                      <p className="text-gray-600 mb-4">{data.months?.join(', ')}</p>
+                      
+                      <div className="space-y-3">
+                        {data.recommendedCrops?.map((crop, index) => (
+                          <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                            <div>
+                              <div className="font-semibold text-gray-800">{crop.name}</div>
+                              <div className="text-sm text-gray-600">{crop.duration} days</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-semibold text-green-600">{crop.score}</div>
+                              <div className="text-xs text-gray-500">Score</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Climate Adaptation */}
+            {recommendations?.climateAdaptation && recommendations.climateAdaptation.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="mb-12"
+              >
+                <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center space-x-2">
+                  <ShieldCheckIcon className="w-6 h-6 text-orange-500" />
+                  <span>Climate Adaptation Strategies</span>
+                </h2>
+                
+                <div className="space-y-4">
+                  {recommendations.climateAdaptation.map((adaptation, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.1 * index }}
+                      className="bg-white rounded-2xl p-6 shadow-lg border border-white/40"
+                    >
+                      <div className="flex items-start space-x-4">
+                        <div className={`p-2 rounded-xl ${
+                          adaptation.priority === 'high' ? 'bg-red-100' : 'bg-yellow-100'
+                        }`}>
+                          <AlertTriangleIcon className={`w-6 h-6 ${
+                            adaptation.priority === 'high' ? 'text-red-500' : 'text-yellow-500'
+                          }`} />
+                        </div>
+                      <div className="flex-1">
+                          <h3 className="text-lg font-bold text-gray-800 mb-2">{adaptation.risk}</h3>
+                          <p className="text-gray-600 mb-4">{adaptation.impact}</p>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="font-semibold text-gray-800 mb-2">Strategies:</h4>
+                              <ul className="space-y-1">
+                                {adaptation.strategies?.map((strategy, i) => (
+                                  <li key={i} className="text-sm text-gray-600 flex items-center space-x-2">
+                                    <CheckCircleIcon className="w-4 h-4 text-green-500" />
+                                    <span>{strategy}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            {adaptation.affectedCrops && adaptation.affectedCrops.length > 0 && (
+                              <div>
+                                <h4 className="font-semibold text-gray-800 mb-2">Affected Crops:</h4>
+                                <div className="flex flex-wrap gap-2">
+                                  {adaptation.affectedCrops.map((crop, i) => (
+                                    <span key={i} className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-sm">
+                                      {crop}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+
+  return (
+    <div className="min-h-screen">
+      <AnimatePresence mode="wait">
+        {currentStep === 'overview' && (
+          <motion.div key="overview">
+            {renderFarmSelection()}
+          </motion.div>
+        )}
+        {currentStep === 'preferences' && (
+          <motion.div key="preferences">
+            {renderPreferences()}
+          </motion.div>
+        )}
+        {currentStep === 'recommendations' && (
+          <motion.div key="recommendations">
+            {renderRecommendations()}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default CropPlanning;

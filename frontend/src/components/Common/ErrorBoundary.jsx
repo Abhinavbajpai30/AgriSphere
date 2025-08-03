@@ -36,8 +36,40 @@ class ErrorBoundary extends Component {
       console.error('Error Boundary caught an error:', error, errorInfo)
     }
 
-    // In production, you might want to send this to an error reporting service
-    // reportError(error, errorInfo)
+    // Send error to monitoring service
+    this.reportError(error, errorInfo)
+  }
+
+  reportError = (error, errorInfo) => {
+    const errorData = {
+      errorId: this.state.errorId,
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+      timestamp: new Date().toISOString(),
+      userId: localStorage.getItem('agrisphere_user_id'),
+      buildVersion: import.meta.env.VITE_BUILD_VERSION || 'unknown'
+    }
+
+    // Log locally
+    console.group(`🚨 Error Report [${errorData.errorId}]`)
+    console.error('Error Details:', errorData)
+    console.groupEnd()
+
+    // Send to backend in production
+    if (import.meta.env.PROD) {
+      fetch('/api/errors/report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(errorData)
+      }).catch(reportError => {
+        console.error('Failed to report error:', reportError)
+      })
+    }
   }
 
   handleRetry = () => {

@@ -1,10 +1,21 @@
 import axios from 'axios'
+import cacheService from './cacheService'
 
 // Configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 const REQUEST_TIMEOUT = 15000 // 15 seconds
 const MAX_RETRIES = 3
 const RETRY_DELAY = 1000 // 1 second
+
+// Cacheable endpoints with their categories
+const CACHEABLE_ENDPOINTS = {
+  '/dashboard/overview': 'dashboard',
+  '/dashboard/weather': 'weather',
+  '/auth/profile': 'profile',
+  '/farm': 'farm',
+  '/irrigation': 'irrigation',
+  '/planning': 'planning',
+}
 
 class ApiService {
   constructor() {
@@ -188,9 +199,66 @@ class ApiService {
     delete this.client.defaults.headers.common['Authorization']
   }
 
-  // Generic HTTP methods
+  // Generic HTTP methods with caching
   async get(url, config = {}) {
-    return this.client.get(url, config)
+    const cacheKey = this.getCacheKey('GET', url, config)
+    const category = this.getCacheCategory(url)
+    
+    // Skip cache if explicitly disabled
+    if (config.skipCache) {
+      return this.client.get(url, config)
+    }
+    
+    // Try to get from cache first
+    if (category) {
+      try {
+        const cachedData = await cacheService.get(cacheKey, category)
+        if (cachedData) {
+          console.log('API: Serving from cache:', url)
+          return { data: cachedData }
+        }
+      } catch (error) {
+        console.warn('Cache get failed:', error)
+      }
+    }
+    
+    // Make network request
+    try {
+      const response = await this.client.get(url, config)
+      
+      // Cache successful responses
+      if (category && response.data) {
+        try {
+          await cacheService.set(cacheKey, response.data, category)
+          console.log('API: Cached response:', url)
+        } catch (error) {
+          console.warn('Cache set failed:', error)
+        }
+      }
+      
+      return response
+    } catch (error) {
+      // Try to serve stale cache on network error
+      if (category && this.isNetworkError(error)) {
+        try {
+          const staleData = await cacheService.get(cacheKey, category)
+          if (staleData) {
+            console.log('API: Serving stale cache due to network error:', url)
+            return { 
+              data: { 
+                ...staleData, 
+                _stale: true, 
+                _cached: true 
+              } 
+            }
+          }
+        } catch (cacheError) {
+          console.warn('Stale cache get failed:', cacheError)
+        }
+      }
+      
+      throw error
+    }
   }
 
   async post(url, data = {}, config = {}) {
@@ -329,6 +397,40 @@ class ApiService {
     } catch (error) {
       console.error('Failed to get API info:', error)
       return null
+    }
+  }
+
+  // Cache helper methods
+  getCacheKey(method, url, config = {}) {
+    const params = config.params ? JSON.stringify(config.params) : ''
+    return `${method}:${url}:${params}`
+  }
+
+  getCacheCategory(url) {
+    for (const [endpoint, category] of Object.entries(CACHEABLE_ENDPOINTS)) {
+      if (url.includes(endpoint)) {
+        return category
+      }
+    }
+    return null
+  }
+
+  // Cache invalidation methods
+  async invalidateCache(pattern) {
+    try {
+      await cacheService.invalidate(pattern)
+      console.log('Cache invalidated:', pattern)
+    } catch (error) {
+      console.warn('Cache invalidation failed:', error)
+    }
+  }
+
+  async clearCache() {
+    try {
+      await cacheService.clear()
+      console.log('All cache cleared')
+    } catch (error) {
+      console.warn('Cache clearing failed:', error)
     }
   }
 }

@@ -11,7 +11,9 @@
     "lint:fix": "eslint . --ext js,jsx --fix",
     "preview": "vite preview --host",
     "serve": "vite preview --host --port 3000",
-    "test": "echo \"Tests not yet implemented\" && exit 0"
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.7",
@@ -21,6 +23,7 @@
     "axios": "^1.11.0",
     "framer-motion": "^12.23.12",
     "leaflet": "^1.9.4",
+    "lucide-react": "^0.536.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-leaflet": "^5.0.0",
@@ -40,6 +43,13 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.11",
     "vite": "^7.0.4",
-    "vite-plugin-pwa": "^1.0.2"
+    "vite-plugin-pwa": "^1.0.2",
+    "vitest": "^1.2.0",
+    "@vitest/ui": "^1.2.0",
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/jest-dom": "^6.2.0",
+    "@testing-library/user-event": "^14.5.1",
+    "jsdom": "^23.2.0",
+    "msw": "^2.0.0"
   }
 }

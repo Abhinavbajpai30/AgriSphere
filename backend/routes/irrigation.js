@@ -1,832 +1,647 @@
 /**
- * Irrigation Management Routes for AgriSphere
- * Handles irrigation recommendations, scheduling, water usage tracking, and efficiency optimization
- * Critical for water management in smallholder farming with limited water resources
+ * Irrigation Management API Routes for AgriSphere
+ * Provides smart irrigation recommendations and logging
  */
 
 const express = require('express');
-const { body, param, query } = require('express-validator');
+const { body, query, validationResult } = require('express-validator');
+
+const { authenticateUser } = require('../middleware/auth');
+const { handleValidationErrors, asyncHandler } = require('../middleware/errorHandler');
+const { success, error } = require('../utils/apiResponse');
+const logger = require('../utils/logger');
+
+const irrigationService = require('../services/irrigationService');
 const IrrigationLog = require('../models/IrrigationLog');
 const Farm = require('../models/Farm');
-const User = require('../models/User');
-const { asyncHandler } = require('../middleware/errorHandler');
-const { handleValidationErrors } = require('../middleware/errorHandler');
-const logger = require('../utils/logger');
-const weatherApi = require('../services/weatherApi');
-const soilApi = require('../services/soilApi');
 
 const router = express.Router();
 
-// Authentication middleware (simplified - should be in separate file)
-const authenticateUser = asyncHandler(async (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Access denied. No token provided.',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  try {
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const user = await User.findById(decoded.userId);
-    if (!user || !user.status.isActive) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid token or user inactive',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      status: 'error',
-      message: 'Invalid token',
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Validation middleware for irrigation recommendation request
-const validateIrrigationRequest = [
-  body('farmId')
-    .isMongoId()
-    .withMessage('Valid farm ID is required'),
-  
-  body('fieldId')
-    .trim()
-    .notEmpty()
-    .withMessage('Field ID is required'),
-  
-  body('cropInfo.cropName')
-    .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Crop name must be between 2 and 50 characters'),
-  
-  body('cropInfo.growthStage')
-    .isIn(['germination', 'seedling', 'vegetative', 'flowering', 'fruit_development', 'maturation', 'harvest'])
-    .withMessage('Invalid growth stage'),
-  
-  body('cropInfo.cultivatedArea.value')
-    .isFloat({ min: 0.01 })
-    .withMessage('Cultivated area must be greater than 0'),
-  
-  body('irrigationSystem.type')
-    .isIn(['manual_watering', 'drip_irrigation', 'sprinkler', 'flood_irrigation', 'center_pivot', 'furrow', 'subsurface_drip', 'micro_sprinkler'])
-    .withMessage('Invalid irrigation system type'),
-  
-  body('environmentalData.soil.moistureLevel.current')
-    .isFloat({ min: 0, max: 100 })
-    .withMessage('Soil moisture level must be between 0 and 100%')
-];
-
-// Validation middleware for irrigation implementation
-const validateIrrigationImplementation = [
-  body('actualStartTime')
-    .isISO8601()
-    .withMessage('Valid start time is required'),
-  
-  body('actualEndTime')
-    .isISO8601()
-    .withMessage('Valid end time is required'),
-  
-  body('waterUsed.value')
-    .isFloat({ min: 0 })
-    .withMessage('Water used must be non-negative'),
-  
-  body('waterUsed.unit')
-    .isIn(['liters', 'gallons', 'cubic_meters'])
-    .withMessage('Invalid water unit'),
-  
-  body('method')
-    .isIn(['manual', 'automated', 'semi_automated'])
-    .withMessage('Invalid irrigation method')
-];
-
 /**
- * @route   POST /api/irrigation/recommend
+ * @route   POST /api/irrigation/recommendation
  * @desc    Get irrigation recommendation for a field
  * @access  Private
  */
-router.post('/recommend', authenticateUser, validateIrrigationRequest, handleValidationErrors, asyncHandler(async (req, res) => {
-  const recommendationData = {
-    ...req.body,
-    user: req.user._id
-  };
+router.post('/recommendation', authenticateUser, [
+  body('farmId').isMongoId().withMessage('Valid farm ID is required'),
+  body('fieldId').notEmpty().withMessage('Field ID is required'),
+  body('cropType').optional().isLength({ min: 2 }).withMessage('Crop type must be at least 2 characters'),
+  body('growthStage').optional().isIn(['initial', 'development', 'mid', 'late']).withMessage('Invalid growth stage'),
+  body('soilType').optional().isIn(['sandy', 'loam', 'clay', 'sandy_loam', 'clay_loam', 'silt_loam']).withMessage('Invalid soil type'),
+  body('lastIrrigation').optional().isISO8601().withMessage('Last irrigation must be a valid date'),
+  body('fieldSize').optional().isFloat({ min: 0.1, max: 1000 }).withMessage('Field size must be between 0.1 and 1000 hectares')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { farmId, fieldId, cropType, growthStage, soilType, lastIrrigation, fieldSize } = req.body;
 
   // Verify farm ownership
   const farm = await Farm.findOne({
-    _id: recommendationData.farmId,
+      _id: farmId,
     owner: req.user._id
   });
 
   if (!farm) {
-    return res.status(404).json({
-      status: 'error',
-      message: 'Farm not found or access denied',
-      timestamp: new Date().toISOString()
-    });
-  }
+      return error(res, 'Farm not found or access denied', 404);
+    }
 
-  // Verify field exists in farm
-  const field = farm.fields?.find(f => f.fieldId === recommendationData.fieldId);
-  if (!field) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Field not found in the specified farm',
-      timestamp: new Date().toISOString()
-    });
-  }
+    // Get farm location
+    const { coordinates } = farm.location;
+    const [longitude, latitude] = coordinates;
 
-  try {
-    const [longitude, latitude] = farm.location.centerPoint.coordinates;
-
-    // Get current weather and forecast
-    const [currentWeather, weatherForecast] = await Promise.all([
-      weatherApi.getCurrentWeather(latitude, longitude),
-      weatherApi.getWeatherForecast(latitude, longitude)
-    ]);
-
-    // Enhance environmental data with weather information
-    const enhancedEnvironmentalData = {
-      ...recommendationData.environmentalData,
-      weather: {
-        temperature: {
-          current: currentWeather.current.temperature,
-          minimum: currentWeather.current.temperature - 5,
-          maximum: currentWeather.current.temperature + 5,
-          average: currentWeather.current.temperature
-        },
-        humidity: {
-          current: currentWeather.current.humidity,
-          average: currentWeather.current.humidity
-        },
-        windSpeed: {
-          current: currentWeather.current.windSpeed,
-          average: currentWeather.current.windSpeed
-        },
-        rainfall: {
-          last24Hours: 0, // Would come from weather history
-          last7Days: 0,
-          forecast48Hours: weatherForecast.forecast.slice(0, 16) // Next 48 hours
-            .reduce((sum, item) => sum + (item.precipitation || 0), 0)
-        },
-        evapotranspiration: {
-          reference: calculateReferenceET(currentWeather),
-          crop: calculateCropET(currentWeather, recommendationData.cropInfo),
-          calculated: true
-        }
+    // Get last irrigation from logs if not provided
+    let lastIrrigationDate = lastIrrigation;
+    if (!lastIrrigationDate) {
+      const lastLog = await IrrigationLog.findOne({
+        farm: farmId,
+        fieldId: fieldId,
+        user: req.user._id
+      }).sort({ irrigationDate: -1 });
+      
+      if (lastLog) {
+        lastIrrigationDate = lastLog.irrigationDate;
       }
-    };
+    }
 
-    // Generate irrigation recommendation
-    const recommendation = await generateIrrigationRecommendation(
-      recommendationData.cropInfo,
-      recommendationData.irrigationSystem,
-      enhancedEnvironmentalData,
-      farm
-    );
+    logger.info('Calculating irrigation recommendation', { 
+      userId: req.user._id, 
+      farmId, 
+      fieldId,
+      location: { latitude, longitude }
+    });
 
-    // Create irrigation log entry
+    // Calculate irrigation recommendation
+    const recommendation = await irrigationService.calculateIrrigationRecommendation({
+      latitude,
+      longitude,
+      cropType: cropType || 'unknown',
+      growthStage: growthStage || 'mid',
+      soilType: soilType || farm.soilType || 'unknown',
+      lastIrrigation: lastIrrigationDate,
+      fieldSize: fieldSize || 1
+    });
+
+    // Log the recommendation request
+    const logData = new IrrigationLog({
+      user: req.user._id,
+      farm: farmId,
+      fieldId,
+      recommendationType: 'calculation',
+      recommendation: {
+        status: recommendation.recommendation.status,
+        priority: recommendation.recommendation.priority,
+        action: recommendation.recommendation.action,
+        amount: recommendation.recommendation.amount,
+        timing: recommendation.recommendation.timing
+      },
+      weatherConditions: {
+        temperature: recommendation.weather.current.temperature,
+        humidity: recommendation.weather.current.humidity,
+        windSpeed: recommendation.weather.current.windSpeed
+      },
+      soilMoisture: {
+        percentage: recommendation.waterBalance.moisturePercentage,
+        status: recommendation.waterBalance.isCritical ? 'critical' : 
+                recommendation.waterBalance.isOptimal ? 'optimal' : 'adequate'
+      },
+      cropDetails: {
+        type: cropType || 'unknown',
+        growthStage: growthStage || 'mid'
+      }
+    });
+
+    await logData.save();
+
+    logger.info('Irrigation recommendation calculated successfully', { 
+      userId: req.user._id,
+      farmId,
+      fieldId,
+      status: recommendation.recommendation.status,
+      amount: recommendation.recommendation.amount
+    });
+
+    return success(res, 'Irrigation recommendation calculated successfully', {
+      recommendation: recommendation.recommendation,
+      waterBalance: recommendation.waterBalance,
+      evapotranspiration: recommendation.evapotranspiration,
+          weather: {
+        current: recommendation.weather.current,
+        forecast: recommendation.weather.forecast.slice(0, 3) // Next 3 days only
+      },
+      soil: recommendation.soil,
+      metadata: recommendation.metadata
+    });
+
+  } catch (err) {
+    logger.error('Irrigation recommendation calculation failed', { 
+      error: err.message, 
+      userId: req.user._id 
+    });
+    return error(res, 'Failed to calculate irrigation recommendation. Please try again.', 500);
+  }
+}));
+
+/**
+ * @route   POST /api/irrigation/log
+ * @desc    Log an irrigation activity
+ * @access  Private
+ */
+router.post('/log', authenticateUser, [
+  body('farmId').isMongoId().withMessage('Valid farm ID is required'),
+  body('fieldId').notEmpty().withMessage('Field ID is required'),
+  body('irrigationDate').isISO8601().withMessage('Irrigation date is required'),
+  body('amount').isFloat({ min: 0 }).withMessage('Amount must be a positive number'),
+  body('duration').optional().isFloat({ min: 0 }).withMessage('Duration must be a positive number'),
+  body('method').optional().isIn(['sprinkler', 'drip', 'flood', 'furrow', 'manual']).withMessage('Invalid irrigation method'),
+  body('notes').optional().isLength({ max: 500 }).withMessage('Notes too long')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { farmId, fieldId, irrigationDate, amount, duration, method, notes } = req.body;
+    
+    // Verify farm ownership
+    const farm = await Farm.findOne({
+      _id: farmId,
+      owner: req.user._id
+    });
+    
+    if (!farm) {
+      return error(res, 'Farm not found or access denied', 404);
+    }
+
+    // Create irrigation log
     const irrigationLog = new IrrigationLog({
-      ...recommendationData,
-      environmentalData: enhancedEnvironmentalData,
-      recommendation,
-      metadata: {
-        source: 'mobile_app',
-        deviceInfo: req.headers['user-agent'] || 'unknown'
+      user: req.user._id,
+      farm: farmId,
+      fieldId,
+      irrigationDate: new Date(irrigationDate),
+      recommendationType: 'manual_log',
+      actualIrrigation: {
+        amount: amount,
+        duration: duration || null,
+        method: method || 'unknown',
+        efficiency: method === 'drip' ? 90 : method === 'sprinkler' ? 75 : 60
+      },
+      notes: notes || '',
+      weatherConditions: {
+        temperature: 0, // Will be updated with actual weather data if available
+        humidity: 0,
+        windSpeed: 0
+      },
+      soilMoisture: {
+        percentage: 0, // Will be estimated based on irrigation
+        status: 'unknown'
       }
     });
 
     await irrigationLog.save();
 
-    logger.info('Irrigation recommendation generated', {
-      logId: irrigationLog.logId,
-      userId: req.user._id,
-      farmId: farm._id,
-      action: recommendation.recommendedAction,
-      waterAmount: recommendation.waterAmount.value
-    });
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Irrigation recommendation generated successfully',
-      data: {
-        recommendation: {
-          logId: irrigationLog.logId,
-          action: recommendation.recommendedAction,
-          waterAmount: recommendation.waterAmount,
-          duration: recommendation.duration,
-          timing: recommendation.timing,
-          reasoning: recommendation.reasoning,
-          urgency: recommendation.timing.urgency,
-          validUntil: recommendation.validUntil
-        },
-        environmentalFactors: {
-          currentSoilMoisture: enhancedEnvironmentalData.soil.moistureLevel.current,
-          weather: {
-            temperature: enhancedEnvironmentalData.weather.temperature.current,
-            humidity: enhancedEnvironmentalData.weather.humidity.current,
-            forecastRainfall: enhancedEnvironmentalData.weather.rainfall.forecast48Hours
-          }
-        }
+    // Update farm statistics
+    await Farm.findByIdAndUpdate(farmId, {
+      $inc: { 
+        'irrigationStats.totalIrrigations': 1,
+        'irrigationStats.totalWaterUsed': amount
       },
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    logger.error('Irrigation recommendation failed', {
-      userId: req.user._id,
-      farmId: recommendationData.farmId,
-      error: error.message
-    });
-
-    res.status(503).json({
-      status: 'error',
-      message: 'Irrigation recommendation service temporarily unavailable',
-      timestamp: new Date().toISOString()
-    });
-  }
-}));
-
-/**
- * @route   PUT /api/irrigation/:logId/implement
- * @desc    Record implementation of irrigation recommendation
- * @access  Private
- */
-router.put('/:logId/implement', authenticateUser, validateIrrigationImplementation, handleValidationErrors, asyncHandler(async (req, res) => {
-  const { logId } = req.params;
-  const implementationData = req.body;
-
-  const irrigationLog = await IrrigationLog.findOne({
-    logId,
-    user: req.user._id
-  });
-
-  if (!irrigationLog) {
-    return res.status(404).json({
-      status: 'error',
-      message: 'Irrigation log not found',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Calculate duration and validate data
-  const startTime = new Date(implementationData.actualStartTime);
-  const endTime = new Date(implementationData.actualEndTime);
-  const durationMinutes = Math.round((endTime - startTime) / (1000 * 60));
-
-  if (durationMinutes <= 0) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'End time must be after start time',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Calculate costs (basic calculation)
-  const waterCost = calculateWaterCost(implementationData.waterUsed);
-  const energyCost = calculateEnergyCost(durationMinutes, irrigationLog.irrigationSystem.type);
-  const laborCost = calculateLaborCost(durationMinutes, implementationData.method);
-
-  const fullImplementationData = {
-    ...implementationData,
-    implementationDate: new Date(),
-    duration: {
-      value: durationMinutes,
-      unit: 'minutes'
-    },
-    costs: {
-      waterCost,
-      energyCost,
-      laborCost,
-      totalCost: {
-        amount: waterCost.amount + energyCost.amount + laborCost.amount,
-        currency: 'USD'
+      $set: { 
+        'irrigationStats.lastIrrigation': new Date(irrigationDate)
       }
-    }
-  };
+    });
 
-  await irrigationLog.updateImplementation(fullImplementationData);
-
-  // Calculate performance metrics
-  const efficiency = irrigationLog.irrigationEfficiency;
-  const costPerArea = irrigationLog.costPerArea;
-  const waterUseIntensity = irrigationLog.waterUseIntensity;
-
-  logger.info('Irrigation implementation recorded', {
-    logId: irrigationLog.logId,
+    logger.info('Irrigation activity logged', { 
     userId: req.user._id,
-    waterUsed: implementationData.waterUsed.value,
-    duration: durationMinutes,
-    efficiency: efficiency?.waterEfficiency
-  });
+      farmId,
+      fieldId,
+      amount,
+      date: irrigationDate
+    });
 
-  res.json({
-    status: 'success',
-    message: 'Irrigation implementation recorded successfully',
-    data: {
-      implementation: {
-        logId: irrigationLog.logId,
-        waterUsed: implementationData.waterUsed,
-        duration: fullImplementationData.duration,
-        costs: fullImplementationData.costs,
-        efficiency,
-        costPerArea,
-        waterUseIntensity
-      },
-      recommendations: [
-        efficiency?.status === 'overwatered' ? 'Consider reducing water amount next time' :
-        efficiency?.status === 'underwatered' ? 'Consider increasing water amount next time' :
-        'Good water management',
-        'Monitor crop response over next 24-48 hours',
-        'Record any observations for future reference'
-      ]
-    },
-    timestamp: new Date().toISOString()
-  });
+    return success(res, 'Irrigation activity logged successfully', {
+      logId: irrigationLog._id,
+      irrigationDate: irrigationLog.irrigationDate,
+      amount: irrigationLog.actualIrrigation.amount,
+      efficiency: irrigationLog.actualIrrigation.efficiency
+    });
+
+  } catch (err) {
+    logger.error('Irrigation logging failed', { 
+      error: err.message, 
+      userId: req.user._id 
+    });
+    return error(res, 'Failed to log irrigation activity. Please try again.', 500);
+  }
 }));
 
 /**
- * @route   GET /api/irrigation
- * @desc    Get irrigation history and logs
+ * @route   GET /api/irrigation/history
+ * @desc    Get irrigation history for a farm/field
  * @access  Private
  */
-router.get('/', authenticateUser, asyncHandler(async (req, res) => {
-  const { 
-    page = 1, 
-    limit = 10, 
-    farmId, 
-    cropName, 
-    timeRange = 30,
-    implemented 
-  } = req.query;
+router.get('/history', authenticateUser, [
+  query('farmId').isMongoId().withMessage('Valid farm ID is required'),
+  query('fieldId').optional().notEmpty().withMessage('Field ID cannot be empty'),
+  query('startDate').optional().isISO8601().withMessage('Start date must be valid'),
+  query('endDate').optional().isISO8601().withMessage('End date must be valid'),
+  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { farmId, fieldId, startDate, endDate, limit = 20, page = 1 } = req.query;
+    
+    // Verify farm ownership
+    const farm = await Farm.findOne({
+      _id: farmId,
+      owner: req.user._id
+    });
+    
+    if (!farm) {
+      return error(res, 'Farm not found or access denied', 404);
+    }
 
-  const query = { user: req.user._id };
+    // Build query
+    const query = {
+      farm: farmId,
+      user: req.user._id
+    };
 
-  // Apply filters
-  if (farmId) {
-    query.farm = farmId;
-  }
-  
-  if (cropName) {
-    query['cropInfo.cropName'] = new RegExp(cropName, 'i');
-  }
-  
-  if (implemented !== undefined) {
-    query['actualIrrigation.wasImplemented'] = implemented === 'true';
-  }
+    if (fieldId) {
+      query.fieldId = fieldId;
+    }
 
-  // Time range filter
-  if (timeRange && parseInt(timeRange) > 0) {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(timeRange));
-    query.createdAt = { $gte: startDate };
-  }
+    if (startDate || endDate) {
+      query.irrigationDate = {};
+      if (startDate) query.irrigationDate.$gte = new Date(startDate);
+      if (endDate) query.irrigationDate.$lte = new Date(endDate);
+    }
 
-  const options = {
-    page: parseInt(page),
-    limit: parseInt(limit),
-    sort: { createdAt: -1 },
-    populate: [
-      {
-        path: 'farm',
-        select: 'farmInfo.name location.address'
-      }
-    ]
-  };
-
-  const irrigationLogs = await IrrigationLog.find(query)
-    .populate(options.populate)
-    .sort(options.sort)
-    .limit(options.limit * 1)
-    .skip((options.page - 1) * options.limit)
-    .select('-metadata.deviceInfo -environmentalData.weather');
-
-  const total = await IrrigationLog.countDocuments(query);
+    // Get paginated results
+    const skip = (page - 1) * limit;
+    const [logs, totalCount] = await Promise.all([
+      IrrigationLog.find(query)
+        .sort({ irrigationDate: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('farm', 'name location')
+        .lean(),
+      IrrigationLog.countDocuments(query)
+    ]);
 
   // Calculate summary statistics
-  const summaryStats = await IrrigationLog.aggregate([
+    const stats = await IrrigationLog.aggregate([
     { $match: query },
     {
       $group: {
         _id: null,
-        totalRecommendations: { $sum: 1 },
-        implementedCount: {
-          $sum: { $cond: ['$actualIrrigation.wasImplemented', 1, 0] }
-        },
-        totalWaterUsed: {
-          $sum: '$actualIrrigation.waterUsed.value'
-        },
-        avgWaterPerIrrigation: {
-          $avg: '$actualIrrigation.waterUsed.value'
-        },
-        totalCost: {
-          $sum: '$actualIrrigation.costs.totalCost.amount'
-        }
+          totalWaterUsed: { $sum: '$actualIrrigation.amount' },
+          totalIrrigations: { $sum: 1 },
+          avgWaterPerIrrigation: { $avg: '$actualIrrigation.amount' },
+          lastIrrigation: { $max: '$irrigationDate' }
       }
     }
   ]);
 
-  res.json({
-    status: 'success',
-    data: {
-      irrigationLogs,
-      pagination: {
-        currentPage: options.page,
-        totalPages: Math.ceil(total / options.limit),
-        totalLogs: total,
-        hasNextPage: options.page < Math.ceil(total / options.limit),
-        hasPrevPage: options.page > 1
-      },
-      summary: summaryStats[0] || {
-        totalRecommendations: 0,
-        implementedCount: 0,
-        totalWaterUsed: 0,
-        avgWaterPerIrrigation: 0,
-        totalCost: 0
-      }
-    },
-    timestamp: new Date().toISOString()
-  });
-}));
-
-/**
- * @route   GET /api/irrigation/schedule/:farmId
- * @desc    Get irrigation schedule for a farm
- * @access  Private
- */
-router.get('/schedule/:farmId', authenticateUser, asyncHandler(async (req, res) => {
-  const { farmId } = req.params;
-  const { days = 7 } = req.query;
-
-  const farm = await Farm.findOne({
-    _id: farmId,
-    owner: req.user._id
-  });
-
-  if (!farm) {
-    return res.status(404).json({
-      status: 'error',
-      message: 'Farm not found',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Get pending and upcoming irrigation schedules
-  const upcomingIrrigation = await IrrigationLog.find({
-    farm: farmId,
-    user: req.user._id,
-    'followUp.nextIrrigationDue': {
-      $gte: new Date(),
-      $lte: new Date(Date.now() + parseInt(days) * 24 * 60 * 60 * 1000)
-    }
-  }).sort({ 'followUp.nextIrrigationDue': 1 });
-
-  // Generate schedule for fields that need irrigation
-  const schedule = [];
-  
-  for (const field of farm.fields || []) {
-    if (field.status === 'active' && field.currentCrop) {
-      // Calculate next irrigation need based on crop and season
-      const nextIrrigation = calculateNextIrrigationNeed(field, farm.location);
-      
-      if (nextIrrigation) {
-        schedule.push({
-          fieldId: field.fieldId,
-          fieldName: field.name,
-          cropName: field.currentCrop,
-          nextIrrigationDue: nextIrrigation.date,
-          urgency: nextIrrigation.urgency,
-          estimatedWaterNeeded: nextIrrigation.waterAmount,
-          reason: nextIrrigation.reason
-        });
-      }
-    }
-  }
-
-  res.json({
-    status: 'success',
-    data: {
+    logger.info('Irrigation history retrieved', { 
+      userId: req.user._id, 
       farmId,
-      scheduleRange: `${days} days`,
-      upcomingIrrigation,
-      predictedSchedule: schedule.sort((a, b) => new Date(a.nextIrrigationDue) - new Date(b.nextIrrigationDue)),
-      totalScheduledItems: upcomingIrrigation.length + schedule.length
-    },
-    timestamp: new Date().toISOString()
-  });
+      recordCount: logs.length
+    });
+
+    return success(res, 'Irrigation history retrieved successfully', {
+      logs,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalCount / limit),
+        totalRecords: totalCount,
+        hasNext: (page * limit) < totalCount,
+        hasPrev: page > 1
+      },
+      statistics: stats[0] || {
+        totalWaterUsed: 0,
+        totalIrrigations: 0,
+        avgWaterPerIrrigation: 0,
+        lastIrrigation: null
+      }
+    });
+
+  } catch (err) {
+    logger.error('Failed to retrieve irrigation history', { 
+      error: err.message, 
+      userId: req.user._id 
+    });
+    return error(res, 'Failed to retrieve irrigation history. Please try again.', 500);
+  }
 }));
 
 /**
- * @route   GET /api/irrigation/analytics/:farmId
- * @desc    Get irrigation analytics and water usage insights
+ * @route   GET /api/irrigation/weather
+ * @desc    Get weather forecast for irrigation planning
  * @access  Private
  */
-router.get('/analytics/:farmId', authenticateUser, asyncHandler(async (req, res) => {
-  const { farmId } = req.params;
-  const { timeRange = 90 } = req.query;
-
+router.get('/weather', authenticateUser, [
+  query('farmId').isMongoId().withMessage('Valid farm ID is required'),
+  query('days').optional().isInt({ min: 1, max: 14 }).withMessage('Days must be between 1 and 14')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { farmId, days = 7 } = req.query;
+    
+    // Verify farm ownership
   const farm = await Farm.findOne({
     _id: farmId,
     owner: req.user._id
   });
 
   if (!farm) {
-    return res.status(404).json({
-      status: 'error',
-      message: 'Farm not found',
-      timestamp: new Date().toISOString()
-    });
-  }
+      return error(res, 'Farm not found or access denied', 404);
+    }
 
-  try {
-    // Get irrigation statistics
-    const stats = await IrrigationLog.getIrrigationStats(parseInt(timeRange));
-    
-    // Get water usage trends
-    const waterTrends = await IrrigationLog.getWaterUsageTrends(farmId, parseInt(timeRange));
-    
-    // Get efficiency metrics
-    const efficiencyMetrics = await IrrigationLog.aggregate([
-      {
-        $match: {
-          farm: require('mongoose').Types.ObjectId(farmId),
-          'actualIrrigation.wasImplemented': true,
-          createdAt: { $gte: new Date(Date.now() - parseInt(timeRange) * 24 * 60 * 60 * 1000) }
-        }
+    // Get farm location
+    const { coordinates } = farm.location;
+    const [longitude, latitude] = coordinates;
+
+    // Get weather forecast
+    const weatherData = await irrigationService.getWeatherForecast(latitude, longitude);
+
+    // Format response for irrigation planning
+    const forecast = weatherData.forecast.slice(0, days).map(day => ({
+      date: day.time,
+      temperature: {
+        value: day.temperature,
+        unit: '°C',
+        category: day.temperature > 30 ? 'hot' : day.temperature < 15 ? 'cool' : 'moderate'
       },
+      humidity: {
+        value: day.humidity,
+        unit: '%',
+        category: day.humidity > 80 ? 'high' : day.humidity < 50 ? 'low' : 'moderate'
+      },
+      precipitation: {
+        value: day.precipitation,
+        unit: 'mm',
+        category: day.precipitation > 10 ? 'heavy' : day.precipitation > 2 ? 'light' : 'none'
+      },
+      windSpeed: {
+        value: day.windSpeed,
+        unit: 'km/h',
+        category: day.windSpeed > 20 ? 'high' : day.windSpeed < 10 ? 'low' : 'moderate'
+      },
+      irrigationAdvice: this.getIrrigationAdvice(day),
+      icon: this.getWeatherIcon(day.summary)
+    }));
+
+    // Calculate irrigation-relevant insights
+    const insights = {
+      totalExpectedRainfall: forecast.reduce((sum, day) => sum + day.precipitation.value, 0),
+      hotDays: forecast.filter(day => day.temperature.value > 30).length,
+      windyDays: forecast.filter(day => day.windSpeed.value > 20).length,
+      rainyDays: forecast.filter(day => day.precipitation.value > 2).length,
+      bestIrrigationDays: forecast
+        .filter(day => day.precipitation.value < 2 && day.windSpeed.value < 15)
+        .map(day => day.date.split('T')[0])
+    };
+
+    logger.info('Weather forecast retrieved for irrigation planning', { 
+      userId: req.user._id, 
+      farmId,
+      days: forecast.length
+    });
+
+    return success(res, 'Weather forecast retrieved successfully', {
+      current: weatherData.current,
+      forecast,
+      insights,
+      location: { latitude, longitude },
+      source: weatherData.source
+    });
+
+  } catch (err) {
+    logger.error('Failed to retrieve weather forecast', { 
+      error: err.message, 
+      userId: req.user._id 
+    });
+    return error(res, 'Failed to retrieve weather forecast. Please try again.', 500);
+  }
+}));
+
+/**
+ * @route   GET /api/irrigation/stats
+ * @desc    Get irrigation statistics and analytics
+ * @access  Private
+ */
+router.get('/stats', authenticateUser, [
+  query('farmId').optional().isMongoId().withMessage('Valid farm ID required'),
+  query('timeframe').optional().isIn(['week', 'month', 'season', 'year']).withMessage('Invalid timeframe'),
+  query('year').optional().isInt({ min: 2020, max: 2030 }).withMessage('Invalid year')
+], handleValidationErrors, asyncHandler(async (req, res) => {
+  try {
+    const { farmId, timeframe = 'month', year = new Date().getFullYear() } = req.query;
+    
+    // Build base query
+    const baseQuery = { user: req.user._id };
+    if (farmId) {
+      // Verify farm ownership
+  const farm = await Farm.findOne({
+    _id: farmId,
+    owner: req.user._id
+  });
+
+  if (!farm) {
+        return error(res, 'Farm not found or access denied', 404);
+      }
+      
+      baseQuery.farm = farmId;
+    }
+
+    // Calculate date range based on timeframe
+    let startDate, endDate;
+    const now = new Date();
+    
+    switch (timeframe) {
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        endDate = now;
+        break;
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        break;
+      case 'season':
+        const currentMonth = now.getMonth();
+        if (currentMonth < 3) { // Winter
+          startDate = new Date(year - 1, 11, 1);
+          endDate = new Date(year, 2, 31);
+        } else if (currentMonth < 6) { // Spring
+          startDate = new Date(year, 2, 1);
+          endDate = new Date(year, 5, 30);
+        } else if (currentMonth < 9) { // Summer
+          startDate = new Date(year, 5, 1);
+          endDate = new Date(year, 8, 30);
+        } else { // Autumn
+          startDate = new Date(year, 8, 1);
+          endDate = new Date(year, 11, 31);
+        }
+        break;
+      case 'year':
+        startDate = new Date(year, 0, 1);
+        endDate = new Date(year, 11, 31);
+        break;
+    }
+
+    baseQuery.irrigationDate = { $gte: startDate, $lte: endDate };
+
+    // Aggregate statistics
+    const stats = await IrrigationLog.aggregate([
+      { $match: baseQuery },
       {
         $group: {
           _id: null,
-          avgWaterEfficiency: { $avg: '$performance.efficiency.waterUseEfficiency' },
-          avgApplicationEfficiency: { $avg: '$performance.efficiency.applicationEfficiency' },
-          avgCostPerArea: { $avg: '$actualIrrigation.costs.totalCost.amount' },
-          systemTypes: { $push: '$irrigationSystem.type' }
+          totalWaterUsed: { $sum: '$actualIrrigation.amount' },
+          totalIrrigations: { $sum: 1 },
+          avgWaterPerIrrigation: { $avg: '$actualIrrigation.amount' },
+          maxSingleIrrigation: { $max: '$actualIrrigation.amount' },
+          minSingleIrrigation: { $min: '$actualIrrigation.amount' },
+          avgEfficiency: { $avg: '$actualIrrigation.efficiency' }
         }
       }
     ]);
 
-    const analytics = {
-      overview: stats[0] || {
-        totalIrrigations: 0,
-        implementedIrrigations: 0,
-        totalWaterUsed: 0,
-        avgWaterPerIrrigation: 0,
-        totalCost: 0
+    // Get irrigation trends (by day/week/month depending on timeframe)
+    let groupBy;
+    switch (timeframe) {
+      case 'week':
+        groupBy = { $dayOfYear: '$irrigationDate' };
+        break;
+      case 'month':
+        groupBy = { $dayOfMonth: '$irrigationDate' };
+        break;
+      case 'season':
+      case 'year':
+        groupBy = { $month: '$irrigationDate' };
+        break;
+    }
+
+    const trends = await IrrigationLog.aggregate([
+      { $match: baseQuery },
+      {
+        $group: {
+          _id: groupBy,
+          waterUsed: { $sum: '$actualIrrigation.amount' },
+          irrigationCount: { $sum: 1 },
+          avgEfficiency: { $avg: '$actualIrrigation.efficiency' }
+        }
       },
-      waterUsageTrends: waterTrends,
-      efficiency: efficiencyMetrics[0] || {
-        avgWaterEfficiency: 0,
-        avgApplicationEfficiency: 0,
-        avgCostPerArea: 0,
-        systemTypes: []
-      },
-      recommendations: generateIrrigationRecommendations(stats[0], efficiencyMetrics[0]),
-      benchmarks: {
-        targetWaterEfficiency: 85,
-        targetApplicationEfficiency: 90,
-        optimalCostRange: '50-100 USD per hectare'
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Get method distribution
+    const methodStats = await IrrigationLog.aggregate([
+      { $match: baseQuery },
+      {
+        $group: {
+          _id: '$actualIrrigation.method',
+          count: { $sum: 1 },
+          totalWater: { $sum: '$actualIrrigation.amount' },
+          avgEfficiency: { $avg: '$actualIrrigation.efficiency' }
+        }
       }
+    ]);
+
+    // Calculate water conservation insights
+    const conservationInsights = {
+      potentialSavings: 0,
+      efficiencyRating: 'unknown',
+      recommendations: []
     };
 
-    res.json({
-      status: 'success',
-      data: {
-        analytics,
-        farmId,
-        timeRange: parseInt(timeRange)
+    if (stats.length > 0) {
+      const avgEfficiency = stats[0].avgEfficiency || 60;
+      const totalWater = stats[0].totalWaterUsed || 0;
+      
+      if (avgEfficiency < 70) {
+        conservationInsights.potentialSavings = totalWater * 0.2; // 20% potential savings
+        conservationInsights.efficiencyRating = 'needs_improvement';
+        conservationInsights.recommendations.push(
+          'Consider switching to drip irrigation for better efficiency',
+          'Schedule irrigations during early morning or evening',
+          'Use soil moisture sensors to optimize timing'
+        );
+      } else if (avgEfficiency < 85) {
+        conservationInsights.potentialSavings = totalWater * 0.1; // 10% potential savings
+        conservationInsights.efficiencyRating = 'good';
+        conservationInsights.recommendations.push(
+          'Fine-tune irrigation scheduling',
+          'Consider mulching to reduce evaporation'
+        );
+      } else {
+        conservationInsights.efficiencyRating = 'excellent';
+        conservationInsights.recommendations.push(
+          'Maintain current practices',
+          'Share your efficient methods with other farmers'
+        );
+      }
+    }
+
+    logger.info('Irrigation statistics calculated', { 
+      userId: req.user._id, 
+      farmId: farmId || 'all_farms',
+      timeframe,
+      recordCount: stats[0]?.totalIrrigations || 0
+    });
+
+    return success(res, 'Irrigation statistics retrieved successfully', {
+      summary: stats[0] || {
+        totalWaterUsed: 0,
+        totalIrrigations: 0,
+        avgWaterPerIrrigation: 0,
+        maxSingleIrrigation: 0,
+        minSingleIrrigation: 0,
+        avgEfficiency: 0
       },
-      timestamp: new Date().toISOString()
+      trends,
+      methodDistribution: methodStats,
+      conservationInsights,
+      timeframe: {
+        type: timeframe,
+        startDate,
+        endDate,
+        year
+      }
     });
 
-  } catch (error) {
-    logger.error('Failed to generate irrigation analytics', {
-      farmId,
-      error: error.message
+  } catch (err) {
+    logger.error('Failed to calculate irrigation statistics', { 
+      error: err.message, 
+      userId: req.user._id 
     });
-
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to generate irrigation analytics',
-      timestamp: new Date().toISOString()
-    });
+    return error(res, 'Failed to retrieve irrigation statistics. Please try again.', 500);
   }
 }));
 
 // Helper functions
-
-/**
- * Calculate reference evapotranspiration
- */
-function calculateReferenceET(weather) {
-  // Simplified Penman-Monteith equation
-  const temp = weather.current.temperature;
-  const humidity = weather.current.humidity;
-  const windSpeed = weather.current.windSpeed;
+function getIrrigationAdvice(dayWeather) {
+  const { temperature, precipitation, windSpeed, humidity } = dayWeather;
   
-  // Basic ET calculation (mm/day)
-  const et = Math.max(0, (temp * 0.1) + (windSpeed * 0.05) - (humidity * 0.02) + 2);
-  return Math.round(et * 100) / 100;
-}
-
-/**
- * Calculate crop evapotranspiration
- */
-function calculateCropET(weather, cropInfo) {
-  const referenceET = calculateReferenceET(weather);
-  
-  // Crop coefficients by growth stage
-  const cropCoefficients = {
-    'germination': 0.4,
-    'seedling': 0.6,
-    'vegetative': 1.0,
-    'flowering': 1.2,
-    'fruit_development': 1.15,
-    'maturation': 0.8,
-    'harvest': 0.6
-  };
-  
-  const kc = cropCoefficients[cropInfo.growthStage] || 1.0;
-  return Math.round(referenceET * kc * 100) / 100;
-}
-
-/**
- * Generate irrigation recommendation
- */
-async function generateIrrigationRecommendation(cropInfo, irrigationSystem, environmentalData, farm) {
-  const soilMoisture = environmentalData.soil.moistureLevel.current;
-  const optimalMoisture = environmentalData.soil.moistureLevel.optimal || 70;
-  const forecastRain = environmentalData.weather.rainfall.forecast48Hours;
-  const cropET = environmentalData.weather.evapotranspiration.crop;
-  const area = cropInfo.cultivatedArea.value;
-  
-  let recommendedAction = 'monitor_only';
-  let waterAmount = { value: 0, unit: 'liters' };
-  let urgency = 'low';
-  let reasoning = { primaryFactors: [] };
-  
-  // Decision logic
-  if (soilMoisture < optimalMoisture * 0.6) {
-    recommendedAction = 'irrigate_now';
-    urgency = 'high';
-    reasoning.primaryFactors.push({
-      factor: 'soil_moisture',
-      value: `${soilMoisture}% (critically low)`,
-      importance: 'critical'
-    });
-  } else if (soilMoisture < optimalMoisture * 0.8 && forecastRain < 5) {
-    recommendedAction = 'irrigate_now';
-    urgency = 'normal';
-    reasoning.primaryFactors.push({
-      factor: 'soil_moisture',
-      value: `${soilMoisture}% (low)`,
-      importance: 'high'
-    });
-  } else if (forecastRain > 20) {
-    recommendedAction = 'skip_irrigation';
-    urgency = 'low';
-    reasoning.primaryFactors.push({
-      factor: 'weather_forecast',
-      value: `${forecastRain}mm rain expected`,
-      importance: 'high'
-    });
+  if (precipitation > 10) {
+    return { advice: 'Skip irrigation - heavy rain expected', priority: 'low', color: 'blue' };
+  } else if (precipitation > 2) {
+    return { advice: 'Light irrigation may be needed', priority: 'low', color: 'green' };
+  } else if (temperature > 35 || humidity < 30) {
+    return { advice: 'High evaporation - increase irrigation', priority: 'high', color: 'red' };
+  } else if (windSpeed > 20) {
+    return { advice: 'Windy conditions - avoid overhead irrigation', priority: 'medium', color: 'yellow' };
+  } else {
+    return { advice: 'Good conditions for irrigation', priority: 'medium', color: 'green' };
   }
-  
-  // Calculate water amount if irrigation is needed
-  if (recommendedAction === 'irrigate_now') {
-    const moistureDeficit = (optimalMoisture - soilMoisture) / 100;
-    const etReplacement = cropET * area * 10; // Convert to liters
-    const deficitReplacement = moistureDeficit * area * 500; // Approximate
-    
-    waterAmount.value = Math.round(Math.max(etReplacement, deficitReplacement));
-    
-    // Adjust for system efficiency
-    const efficiency = irrigationSystem.efficiency / 100;
-    waterAmount.value = Math.round(waterAmount.value / efficiency);
-  }
-  
-  // Calculate duration
-  const flowRate = irrigationSystem.flowRate?.value || 100; // liters per minute
-  const duration = {
-    value: Math.round(waterAmount.value / flowRate),
-    unit: 'minutes'
-  };
-  
-  return {
-    recommendationType: 'weather_based',
-    recommendedAction,
-    waterAmount,
-    duration,
-    timing: {
-      urgency,
-      preferredStartTime: '06:00',
-      preferredEndTime: '09:00',
-      deadline: urgency === 'high' ? new Date(Date.now() + 4 * 60 * 60 * 1000) : null
-    },
-    reasoning,
-    generatedAt: new Date(),
-    validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000)
-  };
 }
 
-/**
- * Calculate water cost
- */
-function calculateWaterCost(waterUsed) {
-  const costPerLiter = 0.002; // $0.002 per liter (adjust based on local rates)
-  return {
-    amount: Math.round(waterUsed.value * costPerLiter * 100) / 100,
-    currency: 'USD'
-  };
-}
-
-/**
- * Calculate energy cost
- */
-function calculateEnergyCost(durationMinutes, systemType) {
-  const powerConsumption = {
-    'manual_watering': 0,
-    'drip_irrigation': 0.5, // kW
-    'sprinkler': 1.5,
-    'center_pivot': 3.0,
-    'flood_irrigation': 2.0
+function getWeatherIcon(summary) {
+  const iconMap = {
+    'sunny': '☀️',
+    'fair_day': '🌤️',
+    'cloudy': '☁️',
+    'rain': '🌧️',
+    'heavy_rain': '⛈️',
+    'snow': '❄️',
+    'fog': '🌫️'
   };
   
-  const power = powerConsumption[systemType] || 1.0;
-  const energyUsed = (power * durationMinutes) / 60; // kWh
-  const costPerKWh = 0.12; // $0.12 per kWh
-  
-  return {
-    amount: Math.round(energyUsed * costPerKWh * 100) / 100,
-    currency: 'USD'
-  };
-}
-
-/**
- * Calculate labor cost
- */
-function calculateLaborCost(durationMinutes, method) {
-  const laborRates = {
-    'manual': 10, // $10 per hour
-    'automated': 0,
-    'semi_automated': 5
-  };
-  
-  const rate = laborRates[method] || 5;
-  const laborHours = durationMinutes / 60;
-  
-  return {
-    amount: Math.round(laborHours * rate * 100) / 100,
-    currency: 'USD'
-  };
-}
-
-/**
- * Calculate next irrigation need for a field
- */
-function calculateNextIrrigationNeed(field, location) {
-  // Simplified calculation - in reality would use weather data and soil sensors
-  const daysUntilNext = Math.floor(Math.random() * 5) + 2; // 2-6 days
-  const nextDate = new Date(Date.now() + daysUntilNext * 24 * 60 * 60 * 1000);
-  
-  return {
-    date: nextDate,
-    urgency: daysUntilNext <= 2 ? 'high' : 'normal',
-    waterAmount: { value: Math.floor(Math.random() * 500) + 200, unit: 'liters' },
-    reason: 'Based on crop growth stage and weather forecast'
-  };
-}
-
-/**
- * Generate irrigation recommendations based on analytics
- */
-function generateIrrigationRecommendations(stats, efficiency) {
-  const recommendations = [];
-  
-  if (stats && stats.implementedIrrigations / stats.totalIrrigations < 0.7) {
-    recommendations.push('Consider implementing more irrigation recommendations to improve crop yields');
-  }
-  
-  if (efficiency && efficiency.avgWaterEfficiency < 80) {
-    recommendations.push('Water efficiency is below optimal. Consider upgrading to drip irrigation or improving system maintenance');
-  }
-  
-  if (efficiency && efficiency.avgApplicationEfficiency < 85) {
-    recommendations.push('Application efficiency could be improved. Check for leaks and ensure proper system calibration');
-  }
-  
-  if (recommendations.length === 0) {
-    recommendations.push('Your irrigation management is performing well. Continue monitoring and maintaining your systems');
-  }
-  
-  return recommendations;
+  return iconMap[summary] || '🌤️';
 }
 
 module.exports = router;

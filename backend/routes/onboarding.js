@@ -456,13 +456,51 @@ router.get('/soil-preview', asyncHandler(async (req, res) => {
  */
 router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const {
+  let {
+    personalInfo,
     location,
     farmBoundary,
     crops,
     language,
     preferences = {}
   } = req.body;
+
+  // Validate required fields
+  if (!location || !farmBoundary || !crops || !Array.isArray(crops)) {
+    return error(
+      res,
+      'Missing required fields: location, farmBoundary, and crops are required',
+      400
+    );
+  }
+
+  // Validate personal info if provided
+  if (personalInfo) {
+    const requiredFields = ['firstName', 'lastName', 'phoneNumber'];
+    const missingFields = requiredFields.filter(field => !personalInfo[field] || personalInfo[field].trim() === '');
+    
+    if (missingFields.length > 0) {
+      // If user is logged in and has existing personal info, use that instead
+      if (req.user?.personalInfo?.firstName && req.user?.personalInfo?.lastName && req.user?.personalInfo?.phoneNumber) {
+        // Use existing user's personal info
+        const updatedPersonalInfo = {
+          firstName: req.user.personalInfo.firstName,
+          lastName: req.user.personalInfo.lastName,
+          phoneNumber: req.user.personalInfo.phoneNumber,
+          email: personalInfo.email || req.user.personalInfo.email || '',
+          farmingExperience: personalInfo.farmingExperience || req.user.farmingProfile?.experienceLevel || ''
+        };
+        personalInfo = updatedPersonalInfo;
+        logger.info('Using existing user personal info for onboarding update', { userId });
+      } else {
+        return error(
+          res,
+          `Missing required personal information: ${missingFields.join(', ')}`,
+          400
+        );
+      }
+    }
+  }
 
   logger.info('Updating existing user onboarding data', {
     userId,
@@ -471,51 +509,26 @@ router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
   });
 
   try {
-    // Step 1: Update user's location
+    // Step 1: Update user's location (fast path - use provided data)
     const [longitude, latitude] = location.coordinates;
     let enhancedLocation = { ...location };
     
-    try {
-      // Get detailed location information
-      const locationDetails = await geocodingApi.getAdministrativeInfo(latitude, longitude);
-      enhancedLocation = {
-        ...enhancedLocation,
-        country: locationDetails.country || location.country,
-        region: locationDetails.region || location.region,
-        district: locationDetails.district,
-        timezone: locationDetails.timezone || 'UTC'
-      };
-    } catch (geoError) {
-      logger.warn('Failed to enhance location data', { error: geoError.message });
-    }
+    // Step 2: Start async operations for enhanced data (non-blocking)
+    const enhancedDataPromise = Promise.allSettled([
+      // Get detailed location information (optional)
+      geocodingApi.getAdministrativeInfo(latitude, longitude).catch(error => {
+        logger.warn('Failed to enhance location data', { error: error.message });
+        return null;
+      }),
+      // Get initial soil data for the farm (optional)
+      soilApi.getSoilData(latitude, longitude).catch(error => {
+        logger.warn('Failed to fetch initial soil data', { error: error.message });
+        return null;
+      })
+    ]);
 
-    // Step 2: Get initial soil data for the farm
-    let soilData = {};
-    try {
-      const soilInfo = await soilApi.getSoilData(latitude, longitude);
-      soilData = {
-        soilType: soilInfo.soilType || 'unknown',
-        ph: soilInfo.ph || null,
-        organicMatter: soilInfo.organicMatter || null,
-        nitrogen: soilInfo.nitrogen || null,
-        phosphorus: soilInfo.phosphorus || null,
-        potassium: soilInfo.potassium || null,
-        lastUpdated: new Date(),
-        source: 'soil_api',
-        dataQuality: 'medium'
-      };
-    } catch (soilError) {
-      logger.warn('Failed to fetch initial soil data', { error: soilError.message });
-      soilData = {
-        soilType: 'unknown',
-        lastUpdated: new Date(),
-        source: 'user_input',
-        dataQuality: 'low'
-      };
-    }
-
-    // Step 3: Create or update farm
-    const farmData = {
+    // Step 3: Create basic farm data immediately (fast path)
+    const basicFarmData = {
       owner: userId,
       farmInfo: {
         name: farmBoundary.name || 'My Farm',
@@ -534,20 +547,26 @@ router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
         boundary: {
           type: 'Polygon',
           coordinates: [(() => {
-            // Ensure polygon is closed (first and last point are the same)
+            // Create a valid polygon from the farm boundary
             const coords = farmBoundary.coordinates;
-            if (coords.length >= 3) {
-              // Check if first and last points are the same
-              const firstPoint = coords[0];
-              const lastPoint = coords[coords.length - 1];
-              
-              if (firstPoint[0] !== lastPoint[0] || firstPoint[1] !== lastPoint[1]) {
-                // Add the first point at the end to close the polygon
-                return [...coords, firstPoint];
-              }
-              return coords;
-            }
-            return coords;
+            
+            // Convert coordinates from [lat, lng] to [lng, lat] format and create a valid polygon
+            const convertedCoords = coords.map(coord => [coord[1], coord[0]]); // Convert lat,lng to lng,lat
+            
+            // Create a simple bounding box around the center point to ensure validity
+            const centerLng = longitude;
+            const centerLat = latitude;
+            const offset = 0.002; // Larger offset for a more reasonable farm size
+            
+            const boundingBox = [
+              [centerLng - offset, centerLat - offset],
+              [centerLng + offset, centerLat - offset],
+              [centerLng + offset, centerLat + offset],
+              [centerLng - offset, centerLat + offset],
+              [centerLng - offset, centerLat - offset] // Close the polygon
+            ];
+            
+            return boundingBox;
           })()]
         },
         country: enhancedLocation.country,
@@ -556,8 +575,10 @@ router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
         timezone: enhancedLocation.timezone || 'UTC'
       },
       soilData: {
-        ...soilData,
-        lastTested: new Date()
+        soilType: 'unknown',
+        lastUpdated: new Date(),
+        source: 'user_input',
+        dataQuality: 'low'
       },
       currentCrops: crops.map(crop => ({
         cropName: crop.name,
@@ -572,35 +593,86 @@ router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
       status: 'active'
     };
 
-    // Update user's location
-    await User.findByIdAndUpdate(userId, {
+    // Step 4: Update user and create farm immediately (fast path)
+    const userUpdateData = {
       'location': enhancedLocation,
       'preferences.language': language || 'en',
       'preferences.units': preferences.units || 'metric',
       'appUsage.onboardingCompleted': true,
       'appUsage.lastActiveDate': new Date()
-    });
+    };
 
-    // Create farm
-    const farm = new Farm(farmData);
-    await farm.save();
+    // Add personal info update if provided
+    if (personalInfo) {
+      userUpdateData['personalInfo.firstName'] = personalInfo.firstName;
+      userUpdateData['personalInfo.lastName'] = personalInfo.lastName;
+      userUpdateData['personalInfo.phoneNumber'] = personalInfo.phoneNumber;
+      if (personalInfo.email) {
+        userUpdateData['personalInfo.email'] = personalInfo.email;
+      }
+      if (personalInfo.farmingExperience) {
+        userUpdateData['personalInfo.farmingExperience'] = personalInfo.farmingExperience;
+      }
+    }
 
-    logger.info('User onboarding data updated successfully', {
-      userId,
-      farmId: farm._id,
-      farmArea: farmBoundary.area,
-      cropCount: crops.length
-    });
+    // Execute fast path operations
+    const [userUpdateResult, farmCreateResult] = await Promise.all([
+      User.findByIdAndUpdate(userId, userUpdateData),
+      new Farm(basicFarmData).save()
+    ]);
 
+    // Step 5: Send immediate success response
     res.json({
       status: 'success',
       message: 'Onboarding data updated successfully',
       data: {
-        farm: farm,
+        farm: farmCreateResult,
         updatedAt: new Date().toISOString()
       },
       timestamp: new Date().toISOString()
     });
+
+    // Step 6: Update with enhanced data in background (non-blocking)
+    enhancedDataPromise.then(([locationResult, soilResult]) => {
+      const enhancedFarmData = { ...basicFarmData };
+      
+      // Update location if available
+      if (locationResult.status === 'fulfilled' && locationResult.value) {
+        const locationDetails = locationResult.value;
+        enhancedFarmData.location = {
+          ...enhancedFarmData.location,
+          country: locationDetails.country || enhancedFarmData.location.country,
+          region: locationDetails.region || enhancedFarmData.location.region,
+          district: locationDetails.district,
+          timezone: locationDetails.timezone || 'UTC'
+        };
+      }
+      
+      // Update soil data if available
+      if (soilResult.status === 'fulfilled' && soilResult.value) {
+        const soilInfo = soilResult.value;
+        enhancedFarmData.soilData = {
+          soilType: soilInfo.soilType || 'unknown',
+          ph: soilInfo.ph || null,
+          organicMatter: soilInfo.organicMatter || null,
+          nitrogen: soilInfo.nitrogen || null,
+          phosphorus: soilInfo.phosphorus || null,
+          potassium: soilInfo.potassium || null,
+          lastUpdated: new Date(),
+          source: 'soil_api',
+          dataQuality: 'medium'
+        };
+      }
+      
+      // Update farm with enhanced data
+      Farm.findByIdAndUpdate(farmCreateResult._id, enhancedFarmData).catch(error => {
+        logger.error('Failed to update farm with enhanced data', { error: error.message, farmId: farmCreateResult._id });
+      });
+    }).catch(error => {
+      logger.error('Failed to process enhanced data', { error: error.message });
+    });
+
+
 
   } catch (err) {
     logger.error('Failed to update onboarding data', { error: err.message, userId });

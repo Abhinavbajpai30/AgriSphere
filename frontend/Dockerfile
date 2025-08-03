@@ -1,11 +1,13 @@
 # Multi-stage build for React frontend
-FROM node:16-alpine AS builder
+FROM node:18-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache git
+# Install security updates and system dependencies
+RUN apk update && apk upgrade && \
+    apk add --no-cache git && \
+    rm -rf /var/cache/apk/*
 
 # Copy package files
 COPY package*.json ./

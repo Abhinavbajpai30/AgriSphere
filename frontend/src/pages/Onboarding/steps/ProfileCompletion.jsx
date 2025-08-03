@@ -169,12 +169,52 @@ const ProfileCompletion = ({ onComplete, onBack, onboardingData, updateData, isL
                 </div>
                 <button
                   onClick={() => {
-                    // Call the onboarding completion API before redirecting
-                    onComplete(onboardingData)
+                    // Use existing user's personal info if available, otherwise require form completion
+                    if (user?.personalInfo?.firstName && user?.personalInfo?.lastName && user?.personalInfo?.phoneNumber) {
+                      // User already has personal info, use it
+                      const completeData = {
+                        ...onboardingData,
+                        personalInfo: {
+                          firstName: user.personalInfo.firstName,
+                          lastName: user.personalInfo.lastName,
+                          phoneNumber: user.personalInfo.phoneNumber,
+                          email: user.personalInfo.email || '',
+                          farmingExperience: user.farmingProfile?.experienceLevel || ''
+                        }
+                      }
+                      onComplete(completeData)
+                    } else {
+                      // User needs to fill out the form first
+                      alert('Please fill out your personal information before proceeding to the dashboard.')
+                    }
                   }}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  disabled={isLoading}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
+                    isLoading 
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                      : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  }`}
                 >
-                  Go to Dashboard
+                  {isLoading ? (
+                    <>
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                      />
+                      <span>Setting up your farm...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Go to Dashboard</span>
+                      <motion.span
+                        animate={{ x: [0, 2, 0] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                      >
+                        →
+                      </motion.span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>

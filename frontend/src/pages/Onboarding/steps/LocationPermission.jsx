@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { MapPinIcon, SignalIcon, CheckCircleIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { MapPinIcon, SignalIcon, CheckCircleIcon, ExclamationTriangleIcon, HandIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useLanguage } from '../../../contexts/LanguageContext'
 
@@ -14,6 +14,86 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 })
 
+// Custom CSS for map markers
+const customMarkerStyle = `
+  .custom-div-icon {
+    background: transparent;
+    border: none;
+  }
+  .custom-div-icon div {
+    transition: all 0.3s ease;
+  }
+  .custom-div-icon:hover div {
+    transform: scale(1.2);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+  }
+  
+  .manual-selection-mode .leaflet-container {
+    cursor: crosshair !important;
+  }
+  
+  .manual-selection-mode .leaflet-container:hover {
+    cursor: crosshair !important;
+  }
+`
+
+// Map click handler component
+const MapClickHandler = ({ onMapClick, isManualMode }) => {
+  const map = useMapEvents({
+    click: (e) => {
+      console.log('Map click event triggered:', e.latlng, 'Manual mode:', isManualMode)
+      if (isManualMode) {
+        console.log('Manual mode active, calling onMapClick')
+        onMapClick(e.latlng)
+      } else {
+        console.log('Manual mode inactive, ignoring click')
+      }
+    },
+    // Disable dragging when in manual mode
+    dragstart: (e) => {
+      if (isManualMode) {
+        console.log('Preventing drag in manual mode')
+        e.originalEvent.preventDefault()
+        e.originalEvent.stopPropagation()
+      }
+    },
+    // Disable zoom when in manual mode
+    zoomstart: (e) => {
+      if (isManualMode) {
+        console.log('Preventing zoom in manual mode')
+        e.originalEvent.preventDefault()
+        e.originalEvent.stopPropagation()
+      }
+    }
+  })
+
+  // Update map options when manual mode changes
+  useEffect(() => {
+    console.log('Updating map controls, manual mode:', isManualMode)
+    if (isManualMode) {
+      map.dragging.disable()
+      map.touchZoom.disable()
+      map.doubleClickZoom.disable()
+      map.scrollWheelZoom.disable()
+      map.boxZoom.disable()
+      map.keyboard.disable()
+      map.tap.disable()
+      console.log('Map controls disabled for manual selection')
+    } else {
+      map.dragging.enable()
+      map.touchZoom.enable()
+      map.doubleClickZoom.enable()
+      map.scrollWheelZoom.enable()
+      map.boxZoom.enable()
+      map.keyboard.enable()
+      map.tap.enable()
+      console.log('Map controls enabled for normal use')
+    }
+  }, [isManualMode, map])
+
+  return null
+}
+
 const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
   const { t } = useLanguage()
   const [locationState, setLocationState] = useState('initial') // initial, requesting, success, error, manual
@@ -22,6 +102,9 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [manualLocation, setManualLocation] = useState('')
+  const [isManualMode, setIsManualMode] = useState(false)
+  const [selectedCoordinates, setSelectedCoordinates] = useState(null)
+  const [toast, setToast] = useState({ show: false, message: '', type: 'error' })
 
   // Benefits of location access
   const benefits = [
@@ -81,6 +164,9 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
               }
             })
             
+            // Show success toast
+            showToast('GPS location found successfully! 📍', 'success')
+            
             setLocationState('success')
           } catch (err) {
             console.error('Geocoding failed:', err)
@@ -131,12 +217,112 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
         }
       })
       
+      // Show success toast
+      showToast('Location found successfully! 🎉', 'success')
+      
       setLocationState('success')
     } catch (err) {
-      setError('Could not find that location. Please try a different address.')
+      console.error('Manual location geocoding failed:', err)
+      
+      // Provide specific error messages based on the error type
+      let errorMessage = 'Could not find that location. Please try a different address.'
+      
+      if (err.message === 'Location not found') {
+        errorMessage = 'Could not find that location. Please try a different address or be more specific.'
+      } else if (err.message.includes('500') || err.message.includes('Internal Server Error')) {
+        errorMessage = 'Geocoding service is temporarily unavailable. Please try again in a few moments.'
+      } else if (err.message.includes('Network') || err.message.includes('fetch')) {
+        errorMessage = 'Network error. Please check your internet connection and try again.'
+      }
+      
+      // Show toast notification
+      showToast(errorMessage, 'error')
+      
+      // Also set error for the input field
+      setError(errorMessage)
+      
+      // Stay in manual state so user can try again
+      setLocationState('manual')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Handle map click for manual location selection
+  const handleMapClick = async (latlng) => {
+    console.log('Map clicked:', latlng, 'Manual mode:', isManualMode)
+    
+    if (!isManualMode) {
+      console.log('Not in manual mode, ignoring click')
+      return
+    }
+    
+    console.log('Processing manual location selection:', latlng)
+    setIsLoading(true)
+    setSelectedCoordinates(latlng)
+    
+    try {
+      // Reverse geocode the clicked location
+      console.log('Reverse geocoding coordinates:', latlng.lat, latlng.lng)
+      const addressData = await reverseGeocode(latlng.lat, latlng.lng)
+      console.log('Geocoding result:', addressData)
+      setAddress(addressData)
+      
+      // Update onboarding data with new coordinates
+      updateData({
+        location: {
+          ...onboardingData.location,
+          coordinates: [latlng.lng, latlng.lat],
+          address: addressData,
+          country: addressData.split(',').pop()?.trim() || '',
+          region: addressData.split(',')[addressData.split(',').length - 2]?.trim() || ''
+        }
+      })
+      
+      setCoordinates({ latitude: latlng.lat, longitude: latlng.lng })
+      setIsManualMode(false)
+      console.log('Location selection completed successfully')
+    } catch (err) {
+      console.error('Geocoding failed for clicked location:', err)
+      // Still update coordinates even if geocoding fails
+      setCoordinates({ latitude: latlng.lat, longitude: latlng.lng })
+      setAddress(`${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`)
+      setIsManualMode(false)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Toggle manual selection mode
+  const toggleManualMode = () => {
+    const newMode = !isManualMode
+    console.log('Toggling manual mode:', newMode)
+    setIsManualMode(newMode)
+    if (!newMode) {
+      setSelectedCoordinates(null)
+      console.log('Manual mode disabled, clearing selected coordinates')
+    } else {
+      console.log('Manual mode enabled, map is now clickable')
+    }
+  }
+
+  // Clear errors when switching states
+  const clearErrors = () => {
+    setError('')
+  }
+
+  // Show toast notification
+  const showToast = (message, type = 'error') => {
+    setToast({ show: true, message, type })
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'error' })
+    }, 5000)
+  }
+
+  // Hide toast
+  const hideToast = () => {
+    setToast({ show: false, message: '', type: 'error' })
   }
 
   // Handle proceed to next step
@@ -181,8 +367,22 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
 
   const geocodeLocation = async (location) => {
     try {
+      console.log('Geocoding location:', location)
       const response = await fetch(`/api/onboarding/geocode?address=${encodeURIComponent(location)}`)
+      
+      if (!response.ok) {
+        console.error('Geocoding API error:', response.status, response.statusText)
+        if (response.status === 500) {
+          throw new Error('500 Internal Server Error - Geocoding service unavailable')
+        } else if (response.status === 404) {
+          throw new Error('Location not found')
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+      }
+      
       const data = await response.json()
+      console.log('Geocoding response:', data)
       
       if (data.status === 'success' && data.data.coordinates) {
         return {
@@ -190,16 +390,61 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
           longitude: data.data.coordinates[0]
         }
       } else {
-        throw new Error('Location not found')
+        // Handle API response with error status
+        const errorMessage = data.message || 'Location not found'
+        throw new Error(errorMessage)
       }
     } catch (error) {
       console.error('Geocoding error:', error)
+      
+      // Re-throw network errors
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Network error - Please check your internet connection')
+      }
+      
       throw error
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
+      <style>{customMarkerStyle}</style>
+      
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full"
+          >
+            <div className={`rounded-xl shadow-2xl border-l-4 p-4 ${
+              toast.type === 'error' 
+                ? 'bg-red-50 border-red-400 text-red-800' 
+                : 'bg-green-50 border-green-400 text-green-800'
+            }`}>
+              <div className="flex items-start space-x-3">
+                {toast.type === 'error' ? (
+                  <ExclamationTriangleIcon className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                ) : (
+                  <CheckCircleIcon className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+                )}
+                <div className="flex-1">
+                  <p className="font-medium">{toast.message}</p>
+                </div>
+                <button
+                  onClick={hideToast}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       <div className="max-w-4xl w-full">
         {/* Header */}
         <motion.div
@@ -292,7 +537,10 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                 </p>
                 
                 <button
-                  onClick={() => setLocationState('manual')}
+                  onClick={() => {
+                    setLocationState('manual')
+                    clearErrors()
+                  }}
                   className="text-primary-600 hover:text-primary-700 underline text-sm"
                 >
                   Or enter your location manually
@@ -392,13 +640,34 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="h-64 rounded-2xl overflow-hidden shadow-xl border border-white/40"
+                className="relative h-64 rounded-2xl overflow-hidden shadow-xl border border-white/40"
               >
+                {/* Manual Selection Overlay */}
+                {isManualMode && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="absolute inset-0 bg-blue-500/20 flex items-center justify-center z-10"
+                  >
+                    <div className="bg-white/90 backdrop-blur-sm rounded-xl p-4 text-center max-w-sm">
+                      <HandIcon className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                      <p className="text-blue-800 font-semibold mb-2">Click anywhere on the map to select your farm location</p>
+                      <div className="flex items-center justify-center space-x-2 text-blue-600 text-sm">
+                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                        <span>Map is now in selection mode</span>
+                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
                 <MapContainer
                   center={[coordinates.latitude, coordinates.longitude]}
                   zoom={13}
                   style={{ height: '100%', width: '100%' }}
+                  className={isManualMode ? 'manual-selection-mode' : ''}
                 >
+                  <MapClickHandler onMapClick={handleMapClick} isManualMode={isManualMode} />
                   <TileLayer
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -413,24 +682,79 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                       </div>
                     </Popup>
                   </Marker>
+                  
+                  {/* Show selected coordinates if in manual mode */}
+                  {isManualMode && selectedCoordinates && (
+                    <Marker 
+                      position={[selectedCoordinates.lat, selectedCoordinates.lng]}
+                      icon={L.divIcon({
+                        className: 'custom-div-icon',
+                        html: '<div style="background-color: #3b82f6; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>',
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                      })}
+                    >
+                      <Popup>
+                        <div className="text-center">
+                          <div className="text-2xl mb-2">📍</div>
+                          <strong>Selected Location</strong>
+                          <br />
+                          <small>Click to confirm this location</small>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  )}
                 </MapContainer>
               </motion.div>
+
+              {/* Manual Selection Controls */}
+              <div className="flex justify-center space-x-4">
+                <motion.button
+                  onClick={toggleManualMode}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`px-6 py-3 rounded-full font-semibold transition-all duration-300 flex items-center space-x-2 ${
+                    isManualMode 
+                      ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg' 
+                      : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg'
+                  }`}
+                >
+                  <HandIcon className="w-5 h-5" />
+                  <span>{isManualMode ? 'Cancel Selection' : 'Choose Different Location'}</span>
+                </motion.button>
+              </div>
 
               {/* Continue Button */}
               <div className="text-center">
                 <motion.button
                   onClick={handleNext}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white font-bold py-4 px-8 rounded-full text-lg shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center space-x-3 mx-auto"
+                  disabled={isLoading}
+                  whileHover={{ scale: isLoading ? 1 : 1.05 }}
+                  whileTap={{ scale: isLoading ? 1 : 0.95 }}
+                  className={`bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white font-bold py-4 px-8 rounded-full text-lg shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center space-x-3 mx-auto ${
+                    isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
-                  <span>Continue to Farm Setup</span>
-                  <motion.span
-                    animate={{ x: [0, 5, 0] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                  >
-                    →
-                  </motion.span>
+                  {isLoading ? (
+                    <>
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
+                      />
+                      <span>Updating Location...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Continue to Farm Setup</span>
+                      <motion.span
+                        animate={{ x: [0, 5, 0] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                      >
+                        →
+                      </motion.span>
+                    </>
+                  )}
                 </motion.button>
               </div>
             </motion.div>
@@ -458,7 +782,10 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                 </h3>
                 <p className="text-orange-600 mb-4">{error}</p>
                 <button
-                  onClick={() => setLocationState('manual')}
+                  onClick={() => {
+                    setLocationState('manual')
+                    clearErrors()
+                  }}
                   className="btn-primary"
                 >
                   Enter Location Manually
@@ -489,15 +816,46 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                     <input
                       type="text"
                       value={manualLocation}
-                      onChange={(e) => setManualLocation(e.target.value)}
+                      onChange={(e) => {
+                        setManualLocation(e.target.value)
+                        // Clear error when user starts typing
+                        if (error) setError('')
+                        // Hide toast when user starts typing
+                        if (toast.show) hideToast()
+                      }}
                       placeholder="e.g., Nakuru County, Kenya or 123 Farm Road, Texas, USA"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+                      className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors ${
+                        error ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                      }`}
                     />
                   </div>
                   
+                  {/* Error Display */}
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-red-50 border border-red-200 rounded-xl p-4"
+                    >
+                      <div className="flex items-start space-x-3">
+                        <ExclamationTriangleIcon className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-red-800 font-medium mb-1">Location Not Found</p>
+                          <p className="text-red-600 text-sm">{error}</p>
+                          <div className="mt-2 text-xs text-red-500">
+                            💡 Try being more specific (e.g., "Chandigarh, India" instead of just "Chandigarh")
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  
                   <div className="flex space-x-4">
                     <button
-                      onClick={() => setLocationState('initial')}
+                      onClick={() => {
+                        setLocationState('initial')
+                        setError('')
+                      }}
                       className="flex-1 btn-outline"
                     >
                       Try GPS Again
@@ -505,11 +863,34 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                     <motion.button
                       onClick={handleManualLocation}
                       disabled={!manualLocation.trim() || isLoading}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      whileHover={{ scale: isLoading ? 1 : 1.02 }}
+                      whileTap={{ scale: isLoading ? 1 : 0.98 }}
+                      className={`flex-1 font-semibold py-3 px-6 rounded-xl transition-all duration-300 flex items-center justify-center space-x-2 ${
+                        isLoading || !manualLocation.trim()
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg hover:shadow-xl'
+                      }`}
                     >
-                      {isLoading ? 'Locating...' : 'Confirm Location'}
+                      {isLoading ? (
+                        <>
+                          <motion.div
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                            className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                          />
+                          <span>Locating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Confirm Location</span>
+                          <motion.span
+                            animate={{ x: [0, 2, 0] }}
+                            transition={{ duration: 1.5, repeat: Infinity }}
+                          >
+                            →
+                          </motion.span>
+                        </>
+                      )}
                     </motion.button>
                   </div>
                 </div>

@@ -65,11 +65,16 @@ const isProfileComplete = (user) => {
   if (!user || !user.personalInfo) return false
   
   // Check if user has completed onboarding
-  return user.appUsage?.onboardingCompleted === true &&
-         user.personalInfo?.firstName &&
-         user.personalInfo?.lastName &&
-         user.location?.coordinates &&
-         user.farmingProfile?.experienceLevel
+  const hasCompletedOnboarding = user.appUsage?.onboardingCompleted === true
+  const hasBasicInfo = user.personalInfo?.firstName && 
+                      user.personalInfo?.lastName && 
+                      user.personalInfo?.phoneNumber
+  const hasLocation = user.location?.coordinates
+  
+  // Note: farmingProfile.experienceLevel is optional and not set during onboarding
+  // So we don't require it for profile completion
+  
+  return hasCompletedOnboarding && hasBasicInfo && hasLocation
 }
 
 // HOC for role-based access control
