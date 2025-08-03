@@ -2,12 +2,6 @@
 
 > **Empowering smallholder farmers with AI-driven agricultural insights, crop diagnosis, smart irrigation, and climate-adaptive planning.**
 
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
-[![React Version](https://img.shields.io/badge/react-%5E19.1.0-blue.svg)](https://reactjs.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/agrisphere/agrisphere)
-[![Coverage](https://img.shields.io/badge/coverage-85%25-yellowgreen.svg)](./coverage)
-
 ## ✨ Features
 
 ### 🩺 AI Crop Doctor
@@ -45,17 +39,14 @@
 - **File Storage**: Multer with Sharp for image processing
 - **External APIs**: OpenEPI for weather, soil, and crop health data
 - **Validation**: Express-validator with custom security rules
-- **Monitoring**: Winston logging with analytics tracking
 
 #### Frontend
 - **Framework**: React 19 with modern hooks and concurrent features
-- **Build Tool**: Vite for fast development and optimized builds
 - **Styling**: Tailwind CSS with custom design system
 - **Animations**: Framer Motion for smooth, engaging interactions
 - **Maps**: React Leaflet for farm boundary visualization
 - **State Management**: Context API with optimized providers
 - **PWA**: Service Worker with offline sync capabilities
-- **Testing**: Vitest with React Testing Library
 
 ## 🚀 Quick Start
 
