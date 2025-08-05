@@ -45,7 +45,7 @@ router.post('/recommendation', authenticateUser, [
     }
 
     // Get farm location
-    const { coordinates } = farm.location;
+    const { coordinates } = farm.location.centerPoint;
     const [longitude, latitude] = coordinates;
 
     // Get last irrigation from logs if not provided
@@ -70,6 +70,7 @@ router.post('/recommendation', authenticateUser, [
     });
 
     // Calculate irrigation recommendation
+    logger.info('About to call irrigation service', { latitude, longitude, cropType, growthStage });
     const recommendation = await irrigationService.calculateIrrigationRecommendation({
       latitude,
       longitude,
@@ -79,37 +80,61 @@ router.post('/recommendation', authenticateUser, [
       lastIrrigation: lastIrrigationDate,
       fieldSize: fieldSize || 1
     });
-
-    // Log the recommendation request
-    const logData = new IrrigationLog({
-      user: req.user._id,
-      farm: farmId,
-      fieldId,
-      recommendationType: 'calculation',
-      recommendation: {
-        status: recommendation.recommendation.status,
-        priority: recommendation.recommendation.priority,
-        action: recommendation.recommendation.action,
-        amount: recommendation.recommendation.amount,
-        timing: recommendation.recommendation.timing
-      },
-      weatherConditions: {
-        temperature: recommendation.weather.current.temperature,
-        humidity: recommendation.weather.current.humidity,
-        windSpeed: recommendation.weather.current.windSpeed
-      },
-      soilMoisture: {
-        percentage: recommendation.waterBalance.moisturePercentage,
-        status: recommendation.waterBalance.isCritical ? 'critical' : 
-                recommendation.waterBalance.isOptimal ? 'optimal' : 'adequate'
-      },
-      cropDetails: {
-        type: cropType || 'unknown',
-        growthStage: growthStage || 'mid'
-      }
+    logger.info('Irrigation service call completed', { 
+      hasRecommendation: !!recommendation,
+      hasWeather: !!recommendation?.weather,
+      hasWaterBalance: !!recommendation?.waterBalance
     });
 
-    await logData.save();
+    // Log the recommendation request
+    logger.info('Creating irrigation log', { 
+      userId: req.user._id,
+      farmId,
+      fieldId,
+      recommendationStatus: recommendation.recommendation?.status
+    });
+    
+    try {
+      const logData = new IrrigationLog({
+        user: req.user._id,
+        farm: farmId,
+        fieldId,
+        irrigationDate: new Date(), // Add current date for recommendation calculations
+        recommendationType: 'calculation',
+        recommendation: {
+          status: recommendation.recommendation?.status || 'monitor',
+          priority: recommendation.recommendation?.priority || 'low',
+          action: recommendation.recommendation?.action || 'monitor',
+          amount: recommendation.recommendation?.amount || 0,
+          timing: recommendation.recommendation?.timing || 'next_assessment'
+        },
+        weatherConditions: {
+          temperature: recommendation.weather?.current?.temperature || 25,
+          humidity: recommendation.weather?.current?.humidity || 60,
+          windSpeed: recommendation.weather?.current?.windSpeed || 10
+        },
+        soilMoisture: {
+          percentage: recommendation.waterBalance?.moisturePercentage || 50,
+          status: recommendation.waterBalance?.isCritical ? 'critical' : 
+                  recommendation.waterBalance?.isOptimal ? 'optimal' : 'adequate'
+        },
+        cropDetails: {
+          type: cropType || 'unknown',
+          growthStage: growthStage || 'mid'
+        }
+      });
+
+      logger.info('Saving irrigation log');
+      await logData.save();
+      logger.info('Irrigation log saved successfully');
+    } catch (logError) {
+      logger.error('Failed to create irrigation log', { 
+        error: logError.message,
+        stack: logError.stack,
+        userId: req.user._id 
+      });
+      // Continue without logging if it fails
+    }
 
     logger.info('Irrigation recommendation calculated successfully', { 
       userId: req.user._id,
@@ -120,23 +145,34 @@ router.post('/recommendation', authenticateUser, [
     });
 
     return success(res, 'Irrigation recommendation calculated successfully', {
-      recommendation: recommendation.recommendation,
-      waterBalance: recommendation.waterBalance,
-      evapotranspiration: recommendation.evapotranspiration,
-          weather: {
-        current: recommendation.weather.current,
-        forecast: recommendation.weather.forecast.slice(0, 3) // Next 3 days only
+      recommendation: recommendation.recommendation || {},
+      waterBalance: recommendation.waterBalance || {},
+      evapotranspiration: recommendation.evapotranspiration || {},
+      weather: {
+        current: recommendation.weather?.current || {},
+        forecast: recommendation.weather?.forecast?.slice(0, 3) || [] // Next 3 days only
       },
-      soil: recommendation.soil,
-      metadata: recommendation.metadata
+      soil: recommendation.soil || {},
+      metadata: recommendation.metadata || {}
     });
 
   } catch (err) {
     logger.error('Irrigation recommendation calculation failed', { 
       error: err.message, 
+      stack: err.stack,
       userId: req.user._id 
     });
-    return error(res, 'Failed to calculate irrigation recommendation. Please try again.', 500);
+    
+    // Provide specific error messages for data unavailability
+    if (err.message.includes('Weather data unavailable') || err.message.includes('weather')) {
+      return error(res, `Weather data unavailable: ${err.message}`, 503);
+    } else if (err.message.includes('Soil data unavailable') || err.message.includes('soil') || err.message.includes('texture')) {
+      return error(res, `Soil data unavailable: ${err.message}`, 503);
+    } else if (err.message.includes('Insufficient') || err.message.includes('Cannot provide reliable')) {
+      return error(res, `Insufficient real data: ${err.message}`, 422);
+    } else {
+      return error(res, `Data service error: ${err.message}`, 503);
+    }
   }
 }));
 
@@ -352,7 +388,7 @@ router.get('/weather', authenticateUser, [
     }
 
     // Get farm location
-    const { coordinates } = farm.location;
+    const { coordinates } = farm.location.centerPoint;
     const [longitude, latitude] = coordinates;
 
     // Get weather forecast
@@ -381,8 +417,8 @@ router.get('/weather', authenticateUser, [
         unit: 'km/h',
         category: day.windSpeed > 20 ? 'high' : day.windSpeed < 10 ? 'low' : 'moderate'
       },
-      irrigationAdvice: this.getIrrigationAdvice(day),
-      icon: this.getWeatherIcon(day.summary)
+      irrigationAdvice: getIrrigationAdvice(day),
+      icon: getWeatherIcon(day.summary)
     }));
 
     // Calculate irrigation-relevant insights

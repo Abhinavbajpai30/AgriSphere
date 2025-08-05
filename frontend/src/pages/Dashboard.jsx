@@ -50,84 +50,14 @@ const Dashboard = () => {
       console.log('Dashboard response:', response)
       
       if (response.data?.status === 'success') {
-        // The actual data is in response.data.message, not response.data.data
-        setDashboardData(response.data.message)
-        console.log('Dashboard data set:', response.data.message)
+        // The actual data is in response.data.data, not response.data.message
+        setDashboardData(response.data.data || response.data)
+        console.log('Dashboard data set:', response.data.data || response.data)
       }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
-      console.log('Using mock data instead...')
-      // Set mock data for development
-      setDashboardData({
-        hasActiveFarm: true,
-        farm: {
-          name: 'My Farm',
-          location: 'Sample Location',
-          area: 100
-        },
-        weather: {
-          current: {
-            temperature: 25,
-            description: 'Partly cloudy',
-            humidity: 65,
-            windSpeed: 12,
-            icon: 'partly-cloudy-day'
-          },
-          forecast: [
-            { date: new Date(), high: 28, low: 18, description: 'Sunny', icon: 'clear-day' },
-            { date: new Date(Date.now() + 86400000), high: 26, low: 16, description: 'Partly cloudy', icon: 'partly-cloudy-day' },
-            { date: new Date(Date.now() + 172800000), high: 24, low: 15, description: 'Light rain', icon: 'rain' }
-          ],
-          alerts: []
-        },
-        tasks: {
-          urgent: [
-            {
-              id: 'irrigation_check',
-              title: 'Check Irrigation System',
-              description: 'Ensure proper water distribution across your farm',
-              priority: 'high',
-              estimatedTime: '30 min',
-              icon: '💧',
-              points: 50,
-              category: 'maintenance'
-            }
-          ],
-          recommended: [
-            {
-              id: 'soil_testing',
-              title: 'Schedule Soil Testing',
-              description: 'Test soil nutrients for next planting season',
-              priority: 'medium',
-              estimatedTime: '1 hour',
-              icon: '🧪',
-              points: 30,
-              category: 'planning'
-            }
-          ],
-          completed: 2,
-          total: 5
-        },
-        progress: {
-          farmHealth: 85,
-          sustainabilityScore: 78,
-          weeklyGoals: {
-            completed: 3,
-            total: 5,
-            percentage: 60
-          },
-          cropGrowth: [
-            {
-              cropName: 'tomato',
-              stage: 'flowering',
-              percentage: 65,
-              daysToHarvest: 25,
-              health: 'good',
-              icon: '🍅'
-            }
-          ]
-        }
-      })
+      // Don't use mock data - set to null to show error state
+      setDashboardData(null)
     } finally {
       setIsLoading(false)
     }
@@ -340,7 +270,7 @@ const Dashboard = () => {
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ delay: 0.4, duration: 0.6 }}
               >
-                <WeatherWidget weatherData={dashboardData?.weather} />
+                <WeatherWidget weatherData={dashboardData?.weather} isLoading={isLoading} />
               </motion.div>
             </div>
           </div>

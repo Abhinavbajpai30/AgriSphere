@@ -22,8 +22,30 @@ class WeatherApiService {
    * Transform OpenEPI weather response to expected format
    */
   transformWeatherData(openEpiResponse, location) {
-    // Handle both flat structure and nested current structure
-    const currentData = openEpiResponse.current || openEpiResponse;
+    // Handle OpenEPI weather forecast format
+    let currentData;
+    
+    if (openEpiResponse.properties?.timeseries?.[0]?.data?.instant?.details) {
+      // OpenEPI weather forecast format
+      const instant = openEpiResponse.properties.timeseries[0].data.instant.details;
+      const next1h = openEpiResponse.properties.timeseries[0].data.next_1_hours;
+      const next6h = openEpiResponse.properties.timeseries[0].data.next_6_hours;
+      
+      currentData = {
+        temperature: instant.air_temperature,
+        humidity: instant.relative_humidity,
+        pressure: instant.air_pressure_at_sea_level,
+        windSpeed: instant.wind_speed,
+        windDirection: instant.wind_from_direction,
+        cloudiness: instant.cloud_area_fraction,
+        dewPoint: instant.dew_point_temperature,
+        description: next1h?.summary?.symbol_code || next6h?.summary?.symbol_code || 'unknown',
+        icon: next1h?.summary?.symbol_code || next6h?.summary?.symbol_code || 'unknown'
+      };
+    } else {
+      // Fallback for other formats
+      currentData = openEpiResponse.current || openEpiResponse;
+    }
     
     return {
       location: {
@@ -33,18 +55,18 @@ class WeatherApiService {
         country: openEpiResponse.location?.country || 'Unknown'
       },
       current: {
-        temperature: currentData.temperature || currentData.temp || null,
+        temperature: currentData.temperature || currentData.temp || currentData.air_temperature,
         feelsLike: currentData.feelsLike || currentData.feels_like || currentData.apparent_temperature,
         humidity: currentData.humidity || currentData.relative_humidity,
-        pressure: currentData.pressure || currentData.surface_pressure,
+        pressure: currentData.pressure || currentData.surface_pressure || currentData.air_pressure_at_sea_level,
         visibility: currentData.visibility,
-        windSpeed: currentData.windSpeed || currentData.wind_speed || currentData.wind?.speed,
-        windDirection: currentData.windDirection || currentData.wind_direction || currentData.wind?.direction,
-        cloudiness: currentData.cloudiness || currentData.cloud_cover,
-        description: currentData.description || currentData.weather_description,
-        icon: currentData.icon || currentData.weather_icon,
+        windSpeed: currentData.windSpeed || currentData.wind_speed,
+        windDirection: currentData.windDirection || currentData.wind_direction || currentData.wind_from_direction,
+        cloudiness: currentData.cloudiness || currentData.cloud_cover || currentData.cloud_area_fraction,
+        description: currentData.description || currentData.weather_description || 'partly cloudy',
+        icon: currentData.icon || currentData.weather_icon || 'partly-cloudy-day',
         uvIndex: currentData.uvIndex || currentData.uv_index,
-        dewPoint: currentData.dewPoint || currentData.dew_point,
+        dewPoint: currentData.dewPoint || currentData.dew_point || currentData.dew_point_temperature,
         precipitation: currentData.precipitation
       },
       timestamp: new Date().toISOString(),
@@ -56,7 +78,57 @@ class WeatherApiService {
    * Transform OpenEPI forecast response to expected format
    */
   transformForecastData(openEpiResponse, location) {
-    const forecast = openEpiResponse.forecast || openEpiResponse.daily || [];
+    let forecast = [];
+    
+    if (openEpiResponse.properties?.timeseries) {
+      // OpenEPI weather forecast format - group by days
+      const dailyData = {};
+      
+      openEpiResponse.properties.timeseries.forEach(entry => {
+        const date = new Date(entry.time).toDateString();
+        const details = entry.data.instant.details;
+        const next6h = entry.data.next_6_hours;
+        
+        if (!dailyData[date]) {
+          dailyData[date] = {
+            date: entry.time,
+            temperatures: [],
+            humidity: details.relative_humidity,
+            pressure: details.air_pressure_at_sea_level,
+            windSpeed: details.wind_speed,
+            windDirection: details.wind_from_direction,
+            cloudiness: details.cloud_area_fraction,
+            precipitation: next6h?.details?.precipitation_amount || 0,
+            description: next6h?.summary?.symbol_code || 'unknown',
+            icon: next6h?.summary?.symbol_code || 'unknown'
+          };
+        }
+        
+        dailyData[date].temperatures.push(details.air_temperature);
+      });
+      
+      // Convert to forecast format
+      forecast = Object.values(dailyData).slice(0, 7).map(day => ({
+        date: day.date,
+        temperature: {
+          min: Math.min(...day.temperatures),
+          max: Math.max(...day.temperatures),
+          avg: day.temperatures.reduce((a, b) => a + b, 0) / day.temperatures.length
+        },
+        humidity: day.humidity,
+        pressure: day.pressure,
+        windSpeed: day.windSpeed,
+        windDirection: day.windDirection,
+        cloudiness: day.cloudiness,
+        precipitation: day.precipitation,
+        precipitationProbability: day.precipitation > 0 ? 80 : 20,
+        description: day.description,
+        icon: day.icon
+      }));
+    } else {
+      // Fallback for other formats
+      forecast = openEpiResponse.forecast || openEpiResponse.daily || [];
+    }
     
     return {
       location: {
@@ -65,24 +137,7 @@ class WeatherApiService {
         name: openEpiResponse.location?.name || 'Unknown',
         country: openEpiResponse.location?.country || 'Unknown'
       },
-      forecast: forecast.map(day => ({
-        date: day.date || day.datetime,
-        temperature: {
-          min: day.temp_min || day.temperature?.min || day.low,
-          max: day.temp_max || day.temperature?.max || day.high,
-          avg: day.temp_avg || day.temperature?.avg
-        },
-        humidity: day.humidity || day.relative_humidity,
-        pressure: day.pressure || day.surface_pressure,
-        windSpeed: day.windSpeed || day.wind_speed || day.wind?.speed,
-        windDirection: day.windDirection || day.wind_direction || day.wind?.direction,
-        cloudiness: day.cloudiness || day.cloud_cover,
-        precipitation: day.precipitation || day.precip,
-        precipitationProbability: day.precipitationProbability || day.precipitation_probability || day.precip_prob,
-        description: day.description || day.weather_description,
-        icon: day.icon || day.weather_icon,
-        uvIndex: day.uvIndex || day.uv_index
-      })),
+      forecast: forecast,
       timestamp: new Date().toISOString(),
       source: 'OpenEPI'
     };

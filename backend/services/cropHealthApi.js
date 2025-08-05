@@ -124,25 +124,7 @@ class CropHealthApiService {
     };
   }
 
-  /**
-   * Analyze crop image for diseases using OpenEPI
-   */
-  async analyzeCropImage(imageData, cropType, location = null) {
-    try {
-      const response = await this.openEpi.analyzeCropImage(imageData, cropType, {
-        useCache: false // Don't cache image analysis
-      });
 
-      const analysis = this.transformCropAnalysis(response, cropType);
-      
-      logger.info('Crop image analysis completed via OpenEPI', { cropType });
-      return analysis;
-
-    } catch (error) {
-      logger.error('Failed to analyze crop image via OpenEPI', { cropType, error: error.message });
-      throw error;
-    }
-  }
 
   /**
    * Get crop disease information using OpenEPI

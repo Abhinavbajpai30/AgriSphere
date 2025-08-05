@@ -47,12 +47,7 @@ const Home = () => {
     }
   ]
 
-  const stats = [
-    { number: '10,000+', label: 'Farmers Helped', emoji: '👨‍🌾' },
-    { number: '50,000+', label: 'Crops Diagnosed', emoji: '🌾' },
-    { number: '8', label: 'Languages', emoji: '🌍' },
-    { number: '99%', label: 'Accuracy Rate', emoji: '🎯' }
-  ]
+
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -77,7 +72,7 @@ const Home = () => {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-24">
       {/* Hero Section */}
       <section className="relative px-4 pt-20 pb-16 overflow-hidden">
         <motion.div
@@ -220,62 +215,10 @@ const Home = () => {
         </motion.div>
       </section>
 
-      {/* Stats Section */}
-      <section className="px-4 py-16">
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true }}
-          className="max-w-4xl mx-auto"
-        >
-          <motion.div variants={itemVariants} className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-gray-800 mb-4">
-              Trusted by Farmers Worldwide
-            </h2>
-            <p className="text-gray-600">
-              Join thousands of farmers already benefiting from smart agriculture
-            </p>
-          </motion.div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {stats.map((stat, index) => (
-              <motion.div
-                key={stat.label}
-                variants={itemVariants}
-                whileHover={{ scale: 1.1 }}
-                className="text-center"
-              >
-                <div className="relative mb-4">
-                  <motion.div
-                    animate={{ 
-                      rotate: [0, 10, -10, 0],
-                      scale: [1, 1.1, 1]
-                    }}
-                    transition={{ 
-                      duration: 2,
-                      repeat: Infinity,
-                      delay: index * 0.2
-                    }}
-                    className="text-4xl mb-2"
-                  >
-                    {stat.emoji}
-                  </motion.div>
-                </div>
-                <div className="text-2xl md:text-3xl font-bold text-gradient-primary mb-1">
-                  {stat.number}
-                </div>
-                <div className="text-sm text-gray-600 font-medium">
-                  {stat.label}
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-      </section>
 
       {/* CTA Section */}
-      <section className="px-4 py-16 bg-gradient-to-br from-primary-500 to-primary-600 text-white">
+      <section className="px-4 py-20 bg-gradient-to-br from-emerald-500 to-green-600 relative z-10">
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -284,17 +227,17 @@ const Home = () => {
           className="max-w-4xl mx-auto text-center"
         >
           <motion.div variants={itemVariants}>
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white">
               Ready to Transform Your Farming?
             </h2>
-            <p className="text-lg mb-8 opacity-90">
+            <p className="text-lg mb-8 text-white/90">
               Join AgriSphere today and experience the future of agriculture
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 to={isAuthenticated ? '/dashboard' : '/register'}
-                className="bg-white text-primary-600 font-semibold py-4 px-8 rounded-2xl hover:bg-gray-50 transition-colors text-lg"
+                className="bg-white text-emerald-600 font-semibold py-4 px-8 rounded-2xl hover:bg-gray-50 transition-colors text-lg shadow-lg"
               >
                 {isAuthenticated ? 'Open Dashboard' : 'Start Free Today'}
               </Link>
@@ -313,7 +256,7 @@ const Home = () => {
       </section>
 
       {/* Floating Elements */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         {[...Array(6)].map((_, i) => (
           <motion.div
             key={i}
@@ -321,7 +264,7 @@ const Home = () => {
               y: [0, -100, 0],
               x: [0, 50, 0],
               rotate: [0, 180, 360],
-              opacity: [0, 0.3, 0]
+              opacity: [0, 0.1, 0]
             }}
             transition={{
               duration: 8 + i * 2,

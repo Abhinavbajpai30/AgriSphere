@@ -7,13 +7,25 @@ import {
   BeakerIcon 
 } from '@heroicons/react/24/outline'
 
-const WeatherWidget = memo(({ weatherData }) => {
-  if (!weatherData?.current) {
+const WeatherWidget = memo(({ weatherData, isLoading = false }) => {
+  if (isLoading) {
     return (
       <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-6 border border-white/30">
         <div className="animate-pulse">
           <div className="h-6 bg-white/30 rounded mb-4"></div>
           <div className="h-16 bg-white/30 rounded"></div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!weatherData?.current) {
+    return (
+      <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-6 border border-white/30">
+        <div className="text-center text-white/80">
+          <div className="text-4xl mb-2">🌐</div>
+          <h3 className="font-semibold mb-1">Weather Data Unavailable</h3>
+          <p className="text-sm text-white/60">Real weather data required</p>
         </div>
       </div>
     )

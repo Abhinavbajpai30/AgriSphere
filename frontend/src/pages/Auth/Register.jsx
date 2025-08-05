@@ -5,6 +5,7 @@ import { EyeIcon, EyeSlashIcon, MapPinIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import LoadingScreen from '../../components/Common/LoadingScreen'
+import PhoneNumberInput from '../../components/Common/PhoneNumberInput'
 
 const Register = () => {
   const [step, setStep] = useState(1)
@@ -30,6 +31,7 @@ const Register = () => {
   })
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLocationLoading, setIsLocationLoading] = useState(false)
   const [error, setError] = useState('')
 
   const { register } = useAuth()
@@ -155,19 +157,62 @@ const Register = () => {
     if (error) setError('')
   }
 
-  const getCurrentLocation = () => {
+  const getCurrentLocation = async () => {
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setFormData(prev => ({
-            ...prev,
-            coordinates: [position.coords.longitude, position.coords.latitude]
-          }))
-        },
-        (error) => {
-          console.error('Error getting location:', error)
+      setIsLocationLoading(true)
+      setError('')
+      
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 60000
+          })
+        })
+
+        const { latitude, longitude } = position.coords
+        
+        // Update coordinates
+        setFormData(prev => ({
+          ...prev,
+          coordinates: [longitude, latitude]
+        }))
+
+        // Reverse geocode to get country and region
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`
+          )
+          
+          if (response.ok) {
+            const data = await response.json()
+            const address = data.address
+            
+            setFormData(prev => ({
+              ...prev,
+              country: address.country || '',
+              region: address.state || address.province || address.region || ''
+            }))
+            
+            console.log('Location data:', {
+              coordinates: [longitude, latitude],
+              country: address.country,
+              region: address.state || address.province || address.region
+            })
+          }
+        } catch (geocodeError) {
+          console.error('Error reverse geocoding:', geocodeError)
+          // Still update coordinates even if geocoding fails
         }
-      )
+      } catch (error) {
+        console.error('Error getting location:', error)
+        setError('Unable to get your location. Please enter manually.')
+      } finally {
+        setIsLocationLoading(false)
+      }
+    } else {
+      setError('Geolocation is not supported by your browser.')
     }
   }
 
@@ -270,27 +315,29 @@ const Register = () => {
                   </div>
                 </div>
 
-                <div className="input-group">
-                  <label className="input-label">{t('phoneNumber')}</label>
-                  <input
-                    type="tel"
-                    name="phoneNumber"
-                    value={formData.phoneNumber}
-                    onChange={handleChange}
-                    placeholder="+1234567890"
-                    className="input-primary"
-                    required
-                  />
-                </div>
+                <PhoneNumberInput
+                  value={formData.phoneNumber}
+                  onChange={(value) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      phoneNumber: value
+                    }))
+                    if (error) setError('')
+                  }}
+                  placeholder="Enter your phone number"
+                  required
+                  error={error && error.includes('phone') ? error : null}
+                />
 
                 <div className="input-group">
-                  <label className="input-label">{t('email')} (Optional)</label>
+                  <label className="input-label">{t('email')}</label>
                   <input
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
                     className="input-primary"
+                    required
                   />
                 </div>
               </motion.div>
@@ -423,12 +470,28 @@ const Register = () => {
                   <button
                     type="button"
                     onClick={getCurrentLocation}
-                    className="btn-outline flex items-center space-x-2"
+                    disabled={isLocationLoading}
+                    className={`btn-outline flex items-center space-x-2 ${
+                      isLocationLoading ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
-                    <MapPinIcon className="w-4 h-4" />
-                    <span>Get Location</span>
+                    {isLocationLoading ? (
+                      <>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+                        />
+                        <span>Getting Location...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MapPinIcon className="w-4 h-4" />
+                        <span>Get Location</span>
+                      </>
+                    )}
                   </button>
-                  {formData.coordinates && (
+                  {formData.coordinates && !isLocationLoading && (
                     <span className="text-xs text-green-600">✓ Location set</span>
                   )}
                 </div>

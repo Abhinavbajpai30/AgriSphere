@@ -30,11 +30,11 @@ router.get('/overview', authenticateUser, asyncHandler(async (req, res) => {
     const primaryFarm = farms[0];
     
     if (!primaryFarm) {
-      return success(res, 'Dashboard data retrieved', {
+      return success(res, {
         hasActiveFarm: false,
         onboardingRequired: true,
         message: 'Complete farm setup to unlock dashboard features'
-      });
+      }, 'Dashboard data retrieved');
     }
 
     // Check if farm has coordinates, otherwise use user's location
@@ -81,15 +81,11 @@ router.get('/overview', authenticateUser, asyncHandler(async (req, res) => {
     let weatherData, agriculturalInsights, tasksSummary, progressData;
     
     try {
-      weatherData = await getWeatherSummary(lat, lon);
+      weatherData = await getWeatherSummary(lat, lon, primaryFarm.location?.address);
       logger.info('Weather data fetched successfully');
     } catch (error) {
       logger.error('Weather data fetch failed', { error: error.message });
-      weatherData = {
-        current: { temperature: '--', description: 'Weather unavailable' },
-        forecast: [],
-        alerts: []
-      };
+      weatherData = null; // No fallback data - let frontend handle this
     }
     
     try {
@@ -145,7 +141,7 @@ router.get('/overview', authenticateUser, asyncHandler(async (req, res) => {
     };
 
     logger.info('Dashboard overview data retrieved', { userId, farmId: primaryFarm._id });
-    return success(res, 'Dashboard data retrieved successfully', dashboardData);
+    return success(res, dashboardData, 'Dashboard data retrieved successfully');
 
   } catch (err) {
     logger.error('Failed to fetch dashboard overview', { error: err.message, userId });
@@ -285,9 +281,9 @@ router.post('/task/:taskId/complete', authenticateUser, asyncHandler(async (req,
 /**
  * Helper function to get weather summary for dashboard
  */
-async function getWeatherSummary(lat, lon) {
+async function getWeatherSummary(lat, lon, farmLocationName) {
   try {
-    logger.info('Fetching weather data', { lat, lon });
+    logger.info('Fetching weather data', { lat, lon, farmLocationName });
     
     const [current, forecast] = await Promise.all([
       weatherApi.getCurrentWeather(lat, lon),
@@ -307,7 +303,7 @@ async function getWeatherSummary(lat, lon) {
     });
 
     // Format location name with coordinates
-    const locationName = current.location?.name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    const locationName = farmLocationName || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     const coordinates = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
     const formattedLocationName = `${locationName} ${coordinates}`;
     
@@ -320,7 +316,7 @@ async function getWeatherSummary(lat, lon) {
       },
       current: {
         temperature: Math.round(current.current.temperature),
-        description: current.current.description,
+        description: formatWeatherDescription(current.current.description),
         humidity: current.current.humidity,
         windSpeed: current.current.windSpeed,
         icon: current.current.icon,
@@ -330,30 +326,48 @@ async function getWeatherSummary(lat, lon) {
         date: day.date,
         high: Math.round(day.temperature.max),
         low: Math.round(day.temperature.min),
-        description: day.description,
+        description: formatWeatherDescription(day.description),
         icon: day.icon,
         precipitation: day.precipitationProbability
       })),
       alerts: generateWeatherAlerts(current, forecast)
     };
   } catch (error) {
-    logger.warn('Failed to fetch weather summary', { error: error.message, stack: error.stack });
-    // Format location name with coordinates for error case
-    const coordinates = `(${lat.toFixed(4)}, ${lon.toFixed(4)})`;
-    const formattedLocationName = `${lat.toFixed(4)}, ${lon.toFixed(4)} ${coordinates}`;
-    
-    return {
-      location: {
-        name: formattedLocationName,
-        country: 'Coordinates',
-        lat: lat,
-        lon: lon
-      },
-      current: { temperature: '--', description: 'Weather unavailable' },
-      forecast: [],
-      alerts: []
-    };
+    logger.error('Failed to fetch weather summary - no fallback data', { error: error.message, stack: error.stack });
+    throw new Error(`Weather data unavailable: ${error.message}`);
   }
+}
+
+/**
+ * Format weather description from OpenEPI format to readable text
+ */
+function formatWeatherDescription(description) {
+  if (!description) return 'Unknown';
+  
+  const weatherMap = {
+    'clearsky_day': 'Clear Sky',
+    'clearsky_night': 'Clear Sky',
+    'fair_day': 'Fair',
+    'fair_night': 'Fair',
+    'partlycloudy_day': 'Partly Cloudy',
+    'partlycloudy_night': 'Partly Cloudy',
+    'cloudy': 'Cloudy',
+    'lightrainshowers_day': 'Light Rain',
+    'lightrainshowers_night': 'Light Rain',
+    'rainshowers_day': 'Rain Showers',
+    'rainshowers_night': 'Rain Showers',
+    'heavyrainshowers_day': 'Heavy Rain',
+    'heavyrainshowers_night': 'Heavy Rain',
+    'rain': 'Rain',
+    'heavyrain': 'Heavy Rain',
+    'lightrain': 'Light Rain',
+    'snow': 'Snow',
+    'fog': 'Fog',
+    'mist': 'Mist',
+    'unknown': 'Unknown'
+  };
+  
+  return weatherMap[description] || description.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 /**

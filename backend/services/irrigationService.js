@@ -134,43 +134,41 @@ class IrrigationService {
     }
 
     try {
-      // Try real OpenEPI API if configured
-      if (this.openEpiConfig.clientId && this.openEpiConfig.clientSecret) {
-        try {
-          const token = await this.getOpenEpiToken();
-          
-          const response = await axios.get(
-            `${this.openEpiConfig.baseURL}/weather/locationforecast`,
-            {
-              params: { lat: latitude, lon: longitude },
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'User-Agent': 'AgriSphere/1.0'
-              },
-              timeout: this.openEpiConfig.timeout
-            }
-          );
-
-          if (response.data && response.data.properties) {
-            const processedData = this.processWeatherData(response.data);
-            this.weatherCache.set(cacheKey, {
-              data: processedData,
-              timestamp: Date.now()
-            });
-            return processedData;
+      // Try public OpenEPI API first (no auth required)
+      try {
+        const response = await axios.get(
+          'https://api.openepi.io/weather/locationforecast',
+          {
+            params: { 
+              lat: latitude, 
+              lon: longitude,
+              altitude: 0
+            },
+            headers: {
+              'User-Agent': 'AgriSphere/1.0'
+            },
+            timeout: 10000
           }
-        } catch (apiError) {
-          logger.warn('OpenEPI Weather API failed, using mock data', { error: apiError.message });
+        );
+
+        if (response.data && response.data.properties && response.data.properties.timeseries) {
+          const processedData = this.processWeatherData(response.data);
+          this.weatherCache.set(cacheKey, {
+            data: processedData,
+            timestamp: Date.now()
+          });
+          return processedData;
         }
+      } catch (apiError) {
+        logger.error('OpenEPI Weather API failed - no fallback available', { 
+          error: apiError.message,
+          status: apiError.response?.status 
+        });
+        throw new ApiError(`Weather data unavailable: ${apiError.message}`, 503);
       }
 
-      // Fallback to mock weather data
-      const mockWeather = this.generateMockWeatherData(latitude, longitude);
-      this.weatherCache.set(cacheKey, {
-        data: mockWeather,
-        timestamp: Date.now()
-      });
-      return mockWeather;
+      // If we reach here, real data is not available
+      throw new ApiError('Real weather data is not available for this location', 503);
 
     } catch (error) {
       logger.error('Failed to get weather forecast', { error: error.message });
@@ -190,47 +188,48 @@ class IrrigationService {
     }
 
     try {
-      // Try real OpenEPI API if configured
-      if (this.openEpiConfig.clientId && this.openEpiConfig.clientSecret) {
-        try {
-          const token = await this.getOpenEpiToken();
-          
-          const response = await axios.get(
-            `${this.openEpiConfig.baseURL}/soil/type`,
-            {
-              params: { lat: latitude, lon: longitude },
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'User-Agent': 'AgriSphere/1.0'
-              },
-              timeout: this.openEpiConfig.timeout
-            }
-          );
-
-          if (response.data) {
-            const processedData = this.processSoilData(response.data);
-            this.soilCache.set(cacheKey, {
-              data: processedData,
-              timestamp: Date.now()
-            });
-            return processedData;
-          }
-        } catch (apiError) {
-          logger.warn('OpenEPI Soil API failed, using mock data', { error: apiError.message });
+      // Try public OpenEPI API (no auth required)
+      const params = new URLSearchParams();
+      params.append('lon', longitude);
+      params.append('lat', latitude);
+      params.append('depths', '0-30cm');
+      ['bdod', 'cec', 'cfvo', 'clay', 'nitrogen', 'ocd', 'ocs', 'phh2o', 'sand', 'silt', 'soc'].forEach(prop => {
+        params.append('properties', prop);
+      });
+      params.append('values', 'mean');
+      
+      const response = await axios.get(
+        `https://api.openepi.io/soil/property?${params.toString()}`,
+        {
+          headers: {
+            'User-Agent': 'AgriSphere/1.0'
+          },
+          timeout: 10000
         }
+      );
+
+      if (response.data && response.data.properties && response.data.properties.layers) {
+        // Check if we actually have soil data
+        if (response.data.properties.layers.length === 0) {
+          throw new ApiError('No soil data available for this location', 404);
+        }
+        
+        const processedData = this.processSoilData(response.data);
+        this.soilCache.set(cacheKey, {
+          data: processedData,
+          timestamp: Date.now()
+        });
+        return processedData;
+      } else {
+        throw new ApiError('No soil data available for this location', 404);
       }
 
-      // Fallback to mock soil data
-      const mockSoil = this.generateMockSoilData(latitude, longitude);
-      this.soilCache.set(cacheKey, {
-        data: mockSoil,
-        timestamp: Date.now()
-      });
-      return mockSoil;
-
     } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
       logger.error('Failed to get soil data', { error: error.message });
-      throw new ApiError('Soil service temporarily unavailable', 503);
+      throw new ApiError(`Soil data unavailable: ${error.message}`, 503);
     }
   }
 
@@ -441,8 +440,35 @@ class IrrigationService {
    * Get crop coefficient based on crop type and growth stage
    */
   getCropCoefficient(cropType, growthStage) {
-    const cropData = this.cropCoefficients[cropType] || this.cropCoefficients.default;
+    // Handle plural forms and normalize crop type
+    const normalizedCropType = this.normalizeCropType(cropType);
+    const cropData = this.cropCoefficients[normalizedCropType] || this.cropCoefficients.default;
     return cropData[growthStage] || cropData.mid;
+  }
+
+  /**
+   * Normalize crop type to handle plural forms and variations
+   */
+  normalizeCropType(cropType) {
+    if (!cropType) return 'default';
+    
+    const cropTypeMap = {
+      'tomatoes': 'tomato',
+      'tomato': 'tomato',
+      'corn': 'corn',
+      'maize': 'corn',
+      'rice': 'rice',
+      'wheat': 'wheat',
+      'potatoes': 'potato',
+      'potato': 'potato',
+      'cassava': 'cassava',
+      'mixed_crops': 'default',
+      'mixed crops': 'default',
+      'unknown': 'default'
+    };
+    
+    const normalized = cropTypeMap[cropType.toLowerCase()];
+    return normalized || 'default';
   }
 
   /**
@@ -628,17 +654,118 @@ class IrrigationService {
    */
   processSoilData(rawData) {
     try {
-      return {
-        type: rawData.soil_type || 'loam',
-        ph: rawData.ph || 6.5,
-        organicMatter: rawData.organic_matter || 2.5,
-        drainage: rawData.drainage || 'moderate',
-        waterHoldingCapacity: rawData.water_holding_capacity || 180,
-        source: 'OpenEPI'
-      };
+      // Handle OpenEPI soil property format (layers structure)
+      if (rawData.properties && rawData.properties.layers) {
+        const availableData = {};
+        
+        // Extract all available properties from layers
+        rawData.properties.layers.forEach(layer => {
+          const depth030 = layer.depths.find(d => d.label === '0-30cm');
+          if (depth030 && depth030.values && depth030.values.mean !== undefined) {
+            availableData[layer.code] = depth030.values.mean;
+          }
+        });
+        
+        // Check if we have minimal required data
+        if (Object.keys(availableData).length === 0) {
+          throw new Error('No soil property data available for 0-30cm depth');
+        }
+        
+        // Check if we have texture data (ideal case) or at least some soil properties
+        const hasTextureData = availableData.clay && availableData.sand && availableData.silt;
+        const hasMinimalData = Object.keys(availableData).length > 0;
+        
+        if (!hasMinimalData) {
+          throw new Error('No soil property data available for this location. Cannot provide irrigation recommendations without soil data.');
+        }
+        
+        if (!hasTextureData) {
+          // Log what data is available
+          logger.warn('Limited soil data available', { 
+            availableProperties: Object.keys(availableData),
+            location: { latitude, longitude }
+          });
+          
+          // Check if we have at least organic matter or other usable properties
+          if (!availableData.ocs && !availableData.soc && !availableData.phh2o) {
+            throw new Error(`Limited soil data available for this location. Available properties: ${Object.keys(availableData).join(', ')}. Need texture data (clay, sand, silt) or more comprehensive soil properties for reliable recommendations.`);
+          }
+        }
+        
+        const clayPercent = availableData.clay;
+        const sandPercent = availableData.sand;
+        const siltPercent = availableData.silt;
+        const ph = availableData.phh2o;
+        const organicCarbon = availableData.soc;
+        const organicCarbonStocks = availableData.ocs;
+        const bulkDensity = availableData.bdod;
+        
+        let soilType = 'unknown';
+        let drainage = 'moderate';
+        let waterHoldingCapacity = 150; // Default reasonable value
+        
+        const result = {
+          source: 'OpenEPI',
+          availableProperties: Object.keys(availableData)
+        };
+        
+        // If we have texture data, use it fully
+        if (hasTextureData) {
+          // Determine soil type based on texture
+          if (clayPercent > 40) soilType = 'clay';
+          else if (sandPercent > 70) soilType = 'sand';
+          else if (siltPercent > 40) soilType = 'silt';
+          else if (clayPercent > 25) soilType = 'clay_loam';
+          else if (sandPercent > 50) soilType = 'sandy_loam';
+          else if (siltPercent > 25) soilType = 'silt_loam';
+          else soilType = 'loam';
+          
+          // Calculate water holding capacity
+          const baseCapacity = clayPercent * 2.5 + siltPercent * 1.5 + sandPercent * 0.8;
+          const organicMatterBonus = organicCarbon ? organicCarbon * 10 : (organicCarbonStocks ? organicCarbonStocks * 2 : 0);
+          waterHoldingCapacity = Math.round(baseCapacity + organicMatterBonus);
+          
+          // Determine drainage
+          if (sandPercent > 60) drainage = 'good';
+          else if (clayPercent > 35) drainage = 'poor';
+          
+          result.texture = {
+            clay: Math.round(clayPercent),
+            sand: Math.round(sandPercent),
+            silt: Math.round(siltPercent)
+          };
+        } else {
+          // Limited data mode - make reasonable estimates based on available data
+          logger.info('Using limited soil data mode', { availableProperties: Object.keys(availableData) });
+          
+          // Estimate water holding capacity from organic matter if available
+          if (organicCarbonStocks) {
+            // OCS is in t/ha, higher values suggest better water retention
+            waterHoldingCapacity = Math.round(120 + (organicCarbonStocks * 2)); // Rough estimate
+          } else if (organicCarbon) {
+            waterHoldingCapacity = Math.round(120 + (organicCarbon * 15));
+          }
+          
+          soilType = 'mixed_composition'; // Indicate we don't have texture data
+          result.dataLimitation = 'Texture data unavailable - using available soil properties for estimates';
+        }
+        
+        result.type = soilType;
+        result.drainage = drainage;
+        result.waterHoldingCapacity = waterHoldingCapacity;
+        
+        // Add optional properties only if available
+        if (ph !== undefined) result.ph = Math.round(ph * 10) / 10;
+        if (organicCarbon !== undefined) result.organicMatter = Math.round(organicCarbon * 10) / 10;
+        if (bulkDensity !== undefined) result.bulkDensity = Math.round(bulkDensity);
+        
+        return result;
+      }
+      
+      throw new Error('Invalid OpenEPI soil data format - no layers found');
     } catch (error) {
       logger.error('Error processing soil data', { error: error.message });
-      throw new Error('Invalid soil data format');
+      throw new Error(`Cannot process soil data: ${error.message}`);
     }
   }
 

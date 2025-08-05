@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { MapPinIcon, SignalIcon, CheckCircleIcon, ExclamationTriangleIcon, HandIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { MapPinIcon, SignalIcon, CheckCircleIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useLanguage } from '../../../contexts/LanguageContext'
@@ -70,24 +70,39 @@ const MapClickHandler = ({ onMapClick, isManualMode }) => {
   // Update map options when manual mode changes
   useEffect(() => {
     console.log('Updating map controls, manual mode:', isManualMode)
+    
+    // Check if map is available before trying to access its methods
+    if (!map) {
+      console.log('Map not available yet')
+      return
+    }
+    
     if (isManualMode) {
-      map.dragging.disable()
-      map.touchZoom.disable()
-      map.doubleClickZoom.disable()
-      map.scrollWheelZoom.disable()
-      map.boxZoom.disable()
-      map.keyboard.disable()
-      map.tap.disable()
-      console.log('Map controls disabled for manual selection')
+      try {
+        map.dragging?.disable()
+        map.touchZoom?.disable()
+        map.doubleClickZoom?.disable()
+        map.scrollWheelZoom?.disable()
+        map.boxZoom?.disable()
+        map.keyboard?.disable()
+        map.tap?.disable()
+        console.log('Map controls disabled for manual selection')
+      } catch (error) {
+        console.error('Error disabling map controls:', error)
+      }
     } else {
-      map.dragging.enable()
-      map.touchZoom.enable()
-      map.doubleClickZoom.enable()
-      map.scrollWheelZoom.enable()
-      map.boxZoom.enable()
-      map.keyboard.enable()
-      map.tap.enable()
-      console.log('Map controls enabled for normal use')
+      try {
+        map.dragging?.enable()
+        map.touchZoom?.enable()
+        map.doubleClickZoom?.enable()
+        map.scrollWheelZoom?.enable()
+        map.boxZoom?.enable()
+        map.keyboard?.enable()
+        map.tap?.enable()
+        console.log('Map controls enabled for normal use')
+      } catch (error) {
+        console.error('Error enabling map controls:', error)
+      }
     }
   }, [isManualMode, map])
 
@@ -650,7 +665,7 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                     className="absolute inset-0 bg-blue-500/20 flex items-center justify-center z-10"
                   >
                     <div className="bg-white/90 backdrop-blur-sm rounded-xl p-4 text-center max-w-sm">
-                      <HandIcon className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                      <MapPinIcon className="w-8 h-8 text-blue-600 mx-auto mb-2" />
                       <p className="text-blue-800 font-semibold mb-2">Click anywhere on the map to select your farm location</p>
                       <div className="flex items-center justify-center space-x-2 text-blue-600 text-sm">
                         <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
@@ -719,7 +734,7 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
                       : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg'
                   }`}
                 >
-                  <HandIcon className="w-5 h-5" />
+                  <MapPinIcon className="w-5 h-5" />
                   <span>{isManualMode ? 'Cancel Selection' : 'Choose Different Location'}</span>
                 </motion.button>
               </div>

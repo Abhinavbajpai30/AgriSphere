@@ -11,6 +11,7 @@ import LoadingScreen from './components/Common/LoadingScreen'
 
 // Critical pages (loaded immediately)
 import Home from './pages/Home'
+import About from './pages/About'
 import Login from './pages/Auth/Login'
 import Register from './pages/Auth/Register'
 
@@ -38,6 +39,7 @@ function App() {
                     <Routes>
                       {/* Public Routes */}
                       <Route path="/" element={<Layout><Home /></Layout>} />
+                      <Route path="/about" element={<Layout><About /></Layout>} />
                       <Route path="/login" element={<Layout><Login /></Layout>} />
                       <Route path="/register" element={<Layout><Register /></Layout>} />
                       

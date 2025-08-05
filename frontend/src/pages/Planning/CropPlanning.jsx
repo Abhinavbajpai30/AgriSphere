@@ -61,22 +61,13 @@ const CropPlanning = () => {
           console.log('Transformed farms:', transformedFarms);
           setFarms(transformedFarms);
         } else {
-          console.log('No farms found in API response, using mock data');
-          // Fallback to mock data if no farms found
-          setFarms([
-            { id: '1', name: 'North Field', size: 2.5, location: 'Punjab, India', soilType: 'Clay Loam' },
-            { id: '2', name: 'South Plot', size: 1.8, location: 'Haryana, India', soilType: 'Sandy Loam' },
-            { id: '3', name: 'East Garden', size: 0.5, location: 'UP, India', soilType: 'Loam' }
-          ]);
+          console.log('No farms found in API response');
+          setFarms([]);
         }
       } catch (error) {
         console.error('Error fetching farms:', error);
-        // Fallback to mock data if API fails
-        setFarms([
-          { id: '1', name: 'North Field', size: 2.5, location: 'Punjab, India', soilType: 'Clay Loam' },
-          { id: '2', name: 'South Plot', size: 1.8, location: 'Haryana, India', soilType: 'Sandy Loam' },
-          { id: '3', name: 'East Garden', size: 0.5, location: 'UP, India', soilType: 'Loam' }
-        ]);
+        // Don't use mock data, just show empty state
+        setFarms([]);
       } finally {
         setFarmsLoading(false);
       }
@@ -100,7 +91,7 @@ const CropPlanning = () => {
         farmId: selectedFarm.id,
         ...userPreferences
       });
-      setRecommendations(response.data.message);
+              setRecommendations(response.data.data || response.data);
     } catch (error) {
       console.error('Error fetching recommendations:', error);
       // Use mock data for demo
@@ -346,24 +337,19 @@ const CropPlanning = () => {
             ))
           ) : farms.length === 0 ? (
             // Empty state
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="col-span-full text-center py-12"
-            >
-              <div className="bg-white rounded-3xl p-8 shadow-xl border border-white/40">
-                <SproutIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-gray-800 mb-2">No Farms Found</h3>
-                <p className="text-gray-600 mb-6">You haven't created any farms yet. Create your first farm to get started with crop recommendations.</p>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-xl font-semibold"
-                >
-                  Create Your First Farm
-                </motion.button>
-              </div>
-            </motion.div>
+            <div className="col-span-full text-center py-12">
+              <div className="text-6xl mb-4">🌾</div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">No Farms Available</h3>
+              <p className="text-gray-600 mb-4">
+                You don't have any farms set up yet. Create a farm first to get crop recommendations.
+              </p>
+              <button 
+                onClick={() => window.location.href = '/farm'}
+                className="px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors"
+              >
+                Go to Farm Management
+              </button>
+            </div>
           ) : (
             // Farm cards
             farms.map((farm, index) => (
@@ -388,7 +374,7 @@ const CropPlanning = () => {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Size:</span>
-                    <span className="font-semibold text-gray-800">{farm.size} hectares</span>
+                    <span className="font-semibold text-gray-800">{Number(farm.size).toFixed(2)} hectares</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Location:</span>

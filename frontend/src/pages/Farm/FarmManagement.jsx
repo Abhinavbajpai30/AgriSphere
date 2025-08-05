@@ -293,7 +293,7 @@ const FarmManagement = () => {
                   <div className="space-y-2 text-sm text-gray-600">
                     <div className="flex justify-between">
                       <span>Size:</span>
-                      <span className="font-medium">{farm.farmInfo.totalArea.value} {farm.farmInfo.totalArea.unit}</span>
+                      <span className="font-medium">{Number(farm.farmInfo.totalArea.value).toFixed(2)} {farm.farmInfo.totalArea.unit}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Crops:</span>

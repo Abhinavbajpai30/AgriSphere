@@ -140,7 +140,7 @@ const CropDiagnosis = () => {
       }
 
       if (uploadResponse.data?.status === 'success') {
-        const uploadId = uploadResponse.data.message.uploadId
+        const uploadId = uploadResponse.data.message?.uploadId
         setUploadId(uploadId)
         
         // Analyze the uploaded images
@@ -165,7 +165,7 @@ const CropDiagnosis = () => {
         setAnalysisProgress(100)
 
         if (analysisResponse.data?.status === 'success') {
-          setDiagnosisResults(analysisResponse.data.message.diagnosis)
+          setDiagnosisResults(analysisResponse.data.message?.diagnosis)
           setCurrentStep('results')
           setShowCelebration(true)
           setTimeout(() => setShowCelebration(false), 3000)

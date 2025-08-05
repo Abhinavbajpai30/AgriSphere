@@ -5,6 +5,7 @@ import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import LoadingScreen from '../../components/Common/LoadingScreen'
+import PhoneNumberInput from '../../components/Common/PhoneNumberInput'
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -93,20 +94,19 @@ const Login = () => {
 
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="input-group">
-              <label className="input-label">
-                {t('phoneNumber')}
-              </label>
-              <input
-                type="tel"
-                name="phoneNumber"
-                value={formData.phoneNumber}
-                onChange={handleChange}
-                placeholder="+1234567890"
-                className="input-primary"
-                required
-              />
-            </div>
+            <PhoneNumberInput
+              value={formData.phoneNumber}
+              onChange={(value) => {
+                setFormData(prev => ({
+                  ...prev,
+                  phoneNumber: value
+                }))
+                if (error) setError('')
+              }}
+              placeholder="Enter your phone number"
+              required
+              error={error && error.includes('phone') ? error : null}
+            />
 
             <div className="input-group">
               <label className="input-label">

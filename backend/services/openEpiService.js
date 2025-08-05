@@ -283,13 +283,63 @@ class OpenEpiService {
    * Weather data endpoints
    */
   async getWeatherData(latitude, longitude, options = {}) {
-    // For now, return mock weather data since OpenEPI weather API is not available
-    return await this.getMockWeatherData(latitude, longitude);
+    try {
+      // Use OpenEPI weather forecast endpoint - no fallback to mock data
+      const result = await this.makeRequest('/weather/locationforecast', {
+        lat: latitude,
+        lon: longitude,
+        altitude: 0
+      }, options);
+      
+      // Validate that we actually got weather data
+      if (!result || !result.properties || !result.properties.timeseries || result.properties.timeseries.length === 0) {
+        throw new Error('No weather data available from OpenEPI for this location');
+      }
+      
+      return result;
+    } catch (error) {
+      logger.error('OpenEPI weather API failed - no fallback available', { 
+        error: error.message,
+        latitude,
+        longitude 
+      });
+      throw new Error(`Weather data unavailable: ${error.message}`);
+    }
   }
 
   async getWeatherForecast(latitude, longitude, days = 7, options = {}) {
-    // For now, return mock forecast data since OpenEPI weather API is not available
-    return await this.getMockWeatherForecast(latitude, longitude, days);
+    try {
+      // Use OpenEPI weather forecast endpoint - no fallback to mock data
+      const forecast = await this.makeRequest('/weather/locationforecast', {
+        lat: latitude,
+        lon: longitude,
+        altitude: 0
+      }, options);
+      
+      // Validate forecast data
+      if (!forecast || !forecast.properties || !forecast.properties.timeseries || forecast.properties.timeseries.length === 0) {
+        throw new Error('No weather forecast data available from OpenEPI for this location');
+      }
+      
+      // Transform the forecast data to include only the requested number of days
+      const now = new Date();
+      const endDate = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000));
+      
+      forecast.properties.timeseries = forecast.properties.timeseries.filter(entry => {
+        const entryDate = new Date(entry.time);
+        return entryDate <= endDate;
+      });
+      
+      return forecast;
+    } catch (error) {
+      logger.error('OpenEPI weather forecast API failed - no fallback available', { 
+        error: error.message,
+        latitude,
+        longitude,
+        days 
+      });
+      throw new Error(`Weather forecast unavailable: ${error.message}`);
+    }
   }
 
   async getMockWeatherData(latitude, longitude) {
@@ -566,25 +616,100 @@ class OpenEpiService {
    * Soil data endpoints
    */
   async getSoilData(latitude, longitude, options = {}) {
-    return this.makeRequest('/soil/properties', {
-      lat: latitude,
-      lon: longitude
-    }, options);
+    try {
+      // Use correct parameters based on OpenEPI soil property documentation
+      // OpenEPI expects array parameters to be passed as repeated keys
+      const params = new URLSearchParams();
+      params.append('lon', longitude);
+      params.append('lat', latitude);
+      params.append('depths', '0-30cm');
+      ['bdod', 'cec', 'cfvo', 'clay', 'nitrogen', 'ocd', 'ocs', 'phh2o', 'sand', 'silt', 'soc'].forEach(prop => {
+        params.append('properties', prop);
+      });
+      params.append('values', 'mean');
+      
+      const response = await this.client.get('/soil/property?' + params.toString());
+      
+      // Validate that we got soil data
+      if (!response.data || !response.data.properties || !response.data.properties.layers || response.data.properties.layers.length === 0) {
+        throw new Error('No soil data available from OpenEPI for this location');
+      }
+      
+      return response.data;
+    } catch (error) {
+      logger.error('OpenEPI soil API failed - no fallback available', { 
+        error: error.message,
+        latitude,
+        longitude 
+      });
+      throw new Error(`Soil data unavailable: ${error.message}`);
+    }
   }
 
   async getSoilComposition(latitude, longitude, depth = 30, options = {}) {
-    return this.makeRequest('/soil/composition', {
-      lat: latitude,
-      lon: longitude,
-      depth_cm: depth
-    }, options);
+    try {
+      // Convert depth to OpenEPI format
+      const depthStr = depth <= 5 ? "0-5cm" : 
+                      depth <= 15 ? "5-15cm" : 
+                      depth <= 30 ? "15-30cm" : 
+                      depth <= 60 ? "30-60cm" : "60-100cm";
+      
+      const params = new URLSearchParams();
+      params.append('lon', longitude);
+      params.append('lat', latitude);
+      params.append('depths', depthStr);
+      ['clay', 'sand', 'silt', 'bdod'].forEach(prop => {
+        params.append('properties', prop);
+      });
+      params.append('values', 'mean');
+      
+      const response = await this.client.get('/soil/property?' + params.toString());
+      return response.data;
+    } catch (error) {
+      logger.warn('OpenEPI soil composition API failed, using fallback data', { 
+        error: error.message,
+        latitude,
+        longitude,
+        depth 
+      });
+      return {
+        properties: {
+          clay: { [depthStr || "0-30cm"]: { mean: 25 } },
+          sand: { [depthStr || "0-30cm"]: { mean: 45 } },
+          silt: { [depthStr || "0-30cm"]: { mean: 30 } }
+        }
+      };
+    }
   }
 
   async getSoilHealth(latitude, longitude, options = {}) {
-    return this.makeRequest('/soil/health', {
-      lat: latitude,
-      lon: longitude
-    }, options);
+    try {
+      const params = new URLSearchParams();
+      params.append('lon', longitude);
+      params.append('lat', latitude);
+      params.append('depths', '0-30cm');
+      ['phh2o', 'soc', 'nitrogen', 'cec'].forEach(prop => {
+        params.append('properties', prop);
+      });
+      params.append('values', 'mean');
+      
+      const response = await this.client.get('/soil/property?' + params.toString());
+      return response.data;
+    } catch (error) {
+      logger.warn('OpenEPI soil health API failed, using fallback data', { 
+        error: error.message,
+        latitude,
+        longitude 
+      });
+      return {
+        properties: {
+          phh2o: { "0-30cm": { mean: 6.5 } }, // pH
+          soc: { "0-30cm": { mean: 2.5 } }, // Soil organic carbon
+          nitrogen: { "0-30cm": { mean: 0.15 } }, // Nitrogen
+          cec: { "0-30cm": { mean: 15 } } // Cation exchange capacity
+        }
+      };
+    }
   }
 
   /**
