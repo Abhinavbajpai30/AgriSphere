@@ -1,281 +1,149 @@
 # 🌾 AgriSphere - AI-Powered Digital Agronomist
 
-> **Empowering smallholder farmers with AI-driven agricultural insights, crop diagnosis, smart irrigation, and climate-adaptive planning.**
+> **Submission for the OpenEPI Hackathon 2025**
+
+**Empowering smallholder farmers with AI-driven agricultural insights, crop diagnosis, smart irrigation, and climate-adaptive planning.**
+
+[![OpenEPI Hackathon 2025](https://img.shields.io/badge/OpenEPI-Hackathon%202025-blue)](https://developer.openepi.io/hackathon-2025)
+[![UN SDGs](https://img.shields.io/badge/UN%20SDGs-1%2C2%2C6%2C13-green)](https://sdgs.un.org/goals)
+[![Team 12](https://img.shields.io/badge/Team-12-orange)]()
+
+---
+
+## 🎯 The Challenge: A Threat to Global Food Security
+
+Smallholder farmers—the backbone of global food security—face unprecedented challenges from climate change, water scarcity, and crop diseases. In Sub-Saharan Africa, Latin America, and South-East Asia, **over 500 million smallholder farms** struggle with:
+- 📉 **40% crop loss** due to preventable diseases and poor irrigation
+- 💧 **60% water waste** from inefficient irrigation practices  
+- 🌡️ **Climate uncertainty** affecting traditional farming methods
+- 📱 **Limited access** to actionable agricultural intelligence
+
+## 🌍 The Solution: AgriSphere
+
+To address this challenge, we have developed **AgriSphere**, a web application that functions as an all-in-one digital toolkit for farmers. AgriSphere's core mission is to synthesize complex environmental data from OpenEPI's open datasets into simple, actionable advice tailored to a farmer's specific location.
+
+The application is designed for extreme simplicity, with a minimal-text, icon-driven interface and multi-language support to ensure maximum accessibility for users who may have limited literacy or technical expertise.
+
+## 🏆 Alignment with OpenEPI Hackathon 2025 Goals
+
+AgriSphere is designed to create a measurable impact and directly aligns with the key themes of the OpenEPI Hackathon:
+
+* **Use of OpenEPI Data**: Our solution is fundamentally built upon the OpenEPI platform, using its APIs for weather, soil, and crop health data to generate hyper-local, actionable insights.
+* **Contribution to UN SDGs**: We are focused on creating a measurable impact on several key UN Sustainable Development Goals:
+    * **SDG 1 (No Poverty)**: By improving farm productivity and profitability.
+    * **SDG 2 (Zero Hunger)**: By directly increasing crop yields and reducing losses.
+    * **SDG 6 (Clean Water and Sanitation)**: By promoting radical water efficiency in agriculture.
+    * **SDG 13 (Climate Action)**: By providing farmers with the tools to adapt to climate change.
+* **Global Reach**: Our target audience is smallholder farmers in developing regions, directly aligning with the hackathon's focus on Sub-Saharan Africa, Latin America, and South-East Asia.
 
 ## ✨ Features
 
 ### 🩺 AI Crop Doctor
-- **Intelligent Diagnosis**: AI-powered plant disease detection and health assessment
-- **Image Recognition**: Upload crop photos for instant analysis using OpenEPI Crop Health API
-- **Treatment Recommendations**: Personalized treatment plans and prevention strategies
-- **History Tracking**: Complete diagnosis history with progress monitoring
+
+* **Intelligent Diagnosis**: AI-powered plant disease detection and health assessment.
+* **Image Recognition**: Farmers can upload a photo of a sick plant for instant analysis using the OpenEPI Crop Health API.
+* **Treatment Recommendations**: Receive a threat-level assessment and a simple, numbered list of accessible treatment steps.
+* **History Tracking**: Complete diagnosis history with progress monitoring.
 
 ### 💧 Smart Irrigation Advisor
-- **Water Optimization**: Advanced evapotranspiration calculations for precise water management
-- **Weather Integration**: Real-time weather data for informed irrigation decisions
-- **Soil Analysis**: Moisture monitoring and soil health assessments
-- **Automated Scheduling**: Smart irrigation timing based on crop needs and weather forecasts
+
+* **Water Optimization**: Provides daily, specific watering advice by calculating evapotranspiration using real-time local weather data and soil properties.
+* **Weather Integration**: Real-time weather data for informed irrigation decisions.
+* **Soil Analysis**: Moisture monitoring and soil health assessments.
+* **Automated Scheduling**: Smart irrigation timing based on crop needs and weather forecasts.
 
 ### 📅 Climate-Smart Planner
-- **Seasonal Planning**: Data-driven crop selection based on climate patterns
-- **Risk Assessment**: Flood risk analysis and climate change adaptation strategies
-- **Market Intelligence**: Price trends and demand forecasting
-- **Yield Optimization**: Maximize productivity through scientific planning
+
+* **Seasonal Planning**: Analyzes a farm's specific soil type and historical weather patterns to provide a ranked list of the most recommended crops.
+* **Risk Assessment**: Details pros, cons, and optimal planting windows for suggested crops.
+* **Market Intelligence**: Price trends and demand forecasting.
+* **Yield Optimization**: Maximize productivity through scientific planning.
 
 ### 🌍 Comprehensive Farm Management
-- **Digital Farm Mapping**: GeoJSON-based farm boundary plotting
-- **Multi-language Support**: Available in English, Hindi, Spanish, French, and German
-- **Offline Capability**: PWA with offline sync for rural connectivity
-- **Analytics Dashboard**: Comprehensive insights and performance metrics
 
+* **Digital Farm Mapping**: GeoJSON-based farm boundary plotting, allowing users to draw a simple polygon to outline their field.
+* **Multi-language Support**: Available in English, Hindi, Spanish, French, and German.
+* **Offline Capability**: PWA with offline sync for rural connectivity.
+* **Analytics Dashboard**: A personal "daily command center" providing at-a-glance wisdom and the single most important task for the day.
 
-### Technology Stack
+## 🛠️ Technology Stack
 
 #### Backend
-- **Runtime**: Node.js 18+ with Express.js framework
-- **Database**: MongoDB with Mongoose ODM
-- **Caching**: Redis for session management and API caching
-- **Authentication**: JWT-based with bcrypt password hashing
-- **File Storage**: Multer with Sharp for image processing
-- **External APIs**: OpenEPI for weather, soil, and crop health data
-- **Validation**: Express-validator with custom security rules
+
+* **Runtime**: Node.js 18+ with Express.js
+* **Database**: MongoDB with Mongoose
+* **Authentication**: JWT-based with bcrypt
+* **File Storage**: Multer with Sharp
+* **External APIs**: **OpenEPI** for weather, soil, and crop health data
 
 #### Frontend
-- **Framework**: React 19 with modern hooks and concurrent features
-- **Styling**: Tailwind CSS with custom design system
-- **Animations**: Framer Motion for smooth, engaging interactions
-- **Maps**: React Leaflet for farm boundary visualization
-- **State Management**: Context API with optimized providers
-- **PWA**: Service Worker with offline sync capabilities
+
+* **Framework**: React
+* **Styling**: Tailwind CSS
+* **Animations**: Framer Motion
+* **Maps**: React Leaflet
+* **State Management**: Context API
+* **PWA**: Service Worker with offline sync
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 18+ and npm
-- MongoDB 5.0+
+* Node.js 18+ and npm
+* MongoDB 5.0+
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/agrisphere/agrisphere.git
-   cd agrisphere
-   ```
+1.  **Clone the repository**
+    ```bash
+    git clone [https://github.com/agrisphere/agrisphere.git](https://github.com/agrisphere/agrisphere.git)
+    cd agrisphere
+    ```
 
-2. **Install dependencies**
-   ```bash
-   # Install backend dependencies
-   cd backend
-   npm install
-   
-   # Install frontend dependencies
-   cd ../frontend
-   npm install
-   ```
+2.  **Install dependencies**
+    ```bash
+    # Install backend dependencies
+    cd backend
+    npm install
+    
+    # Install frontend dependencies
+    cd ../frontend
+    npm install
+    ```
 
-3. **Environment Setup**
-   ```bash
-   # Backend environment
-   cd backend
-   cp env.example .env
-   # Edit .env with your configuration
-   
-   # Frontend environment
-   cd ../frontend
-   cp .env.example .env.local
-   # Edit .env.local with your configuration
-   ```
+3.  **Environment Setup**
+    ```bash
+    # Backend environment
+    cd backend
+    cp env.example .env
+    # Edit .env with your configuration
+    
+    # Frontend environment
+    cd ../frontend
+    cp .env.example .env.local
+    # Edit .env.local with your configuration
+    ```
 
-4. **Database Setup**
-   ```bash
-   # Start MongoDB (if not running)
-   mongod
-   
-   # Run database migrations
-   cd backend
-   npm run migrate
-   ```
+4.  **Start Development Servers**
+    ```bash
+    # Terminal 1: Backend
+    cd backend
+    npm run dev
+    
+    # Terminal 2: Frontend
+    cd frontend
+    npm run dev
+    ```
 
-5. **Start Development Servers**
-   ```bash
-   # Terminal 1: Backend
-   cd backend
-   npm run dev
-   
-   # Terminal 2: Frontend
-   cd frontend
-   npm run dev
-   ```
-
-6. **Access the Application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-   - API Documentation: http://localhost:5000/api/docs
-
-## 📖 Documentation
-
-### API Documentation
-
-Our REST API is fully documented with OpenAPI/Swagger:
-
-- **Interactive Docs**: `/api/docs` (Swagger UI)
-- **OpenAPI Spec**: `/api/docs/openapi.json`
-
-#### Key Endpoints
-
-```javascript
-// Authentication
-POST   /api/auth/register     // User registration
-POST   /api/auth/login        // User login
-GET    /api/auth/me           // Get user profile
-
-// Farm Management
-GET    /api/farm              // List user farms
-POST   /api/farm              // Create new farm
-PUT    /api/farm/:id          // Update farm details
-
-// Crop Diagnosis
-POST   /api/diagnosis/upload  // Upload crop images
-POST   /api/diagnosis/analyze // Analyze crop health
-GET    /api/diagnosis/history // Get diagnosis history
-
-// Irrigation
-POST   /api/irrigation/recommendation // Get irrigation advice
-POST   /api/irrigation/log           // Log irrigation activity
-GET    /api/irrigation/history       // Get irrigation history
-
-// Planning
-GET    /api/planning/recommendations // Get crop recommendations
-GET    /api/planning/calendar        // Get seasonal calendar
-POST   /api/planning/compare-crops   // Compare crop options
-```
-
-### Environment Variables
-
-#### Backend (.env)
-```bash
-# Server Configuration
-PORT=5000
-NODE_ENV=development
-JWT_SECRET=your-super-secret-jwt-key
-
-# Database
-MONGODB_URI=mongodb://localhost:27017/agrisphere
-REDIS_URL=redis://localhost:6379
-
-# External APIs
-OPENEPI_CLIENT_ID=your-openepi-client-id
-OPENEPI_CLIENT_SECRET=your-openepi-client-secret
-WEATHER_API_KEY=your-weather-api-key
-
-# File Storage
-UPLOAD_PATH=./uploads
-MAX_FILE_SIZE=52428800
-```
-
-#### Frontend (.env.local)
-```bash
-# API Configuration
-VITE_API_URL=http://localhost:5000/api
-VITE_BUILD_VERSION=1.0.0
-
-# Feature Flags
-VITE_ENABLE_ANALYTICS=true
-VITE_ENABLE_PUSH_NOTIFICATIONS=false
-
-# External Services
-VITE_GOOGLE_MAPS_API_KEY=your-google-maps-key
-```
-
-## 🚀 Deployment
-
-### Production Deployment with Docker
-
-1. **Build Production Images**
-   ```bash
-   # Build backend
-   docker build -t agrisphere-backend:latest ./backend
-   
-   # Build frontend
-   docker build -t agrisphere-frontend:latest ./frontend
-   ```
-
-2. **Deploy with Docker Compose**
-   ```bash
-   # Production deployment
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-   ```
+* **Access the Application**:
+    * Frontend: `http://localhost:3000`
+    * Backend API: `http://localhost:5000`
 
 
-### Health Checks
+## 👥 The Team & Acknowledgments
 
-Monitor application health with built-in endpoints:
-
-```bash
-# Basic health check
-curl http://localhost:5000/api/health
-```
-
-## 📊 Monitoring
-
-### Application Monitoring
-
-- **Health Checks**: Kubernetes-compatible liveness and readiness probes
-- **Metrics Collection**: System and business metrics tracking
-- **Error Tracking**: Comprehensive error logging and reporting
-- **Performance Monitoring**: API response times and resource usage
-- **User Analytics**: Feature usage and user journey tracking
-
-### Monitoring Endpoints
-
-```bash
-# System health
-GET /api/health/detailed
-
-# Application metrics
-GET /api/health/metrics
-
-# Analytics dashboard
-GET /api/analytics/dashboard
-
-# Error reports
-GET /api/errors/summary
-```
-
-
-## 🌐 Internationalization
-
-### Supported Languages
-
-- 🇺🇸 English (en)
-- 🇮🇳 Hindi (hi)
-- 🇪🇸 Spanish (es)
-- 🇫🇷 French (fr)
-- 🇩🇪 German (de)
-
-### Adding New Languages
-
-```javascript
-// Add translation files
-src/locales/
-├── en.json
-├── hi.json
-├── es.json
-└── your-language.json
-
-// Usage in components
-import { useTranslation } from '@/contexts/LanguageContext'
-
-const { t } = useTranslation()
-return <h1>{t('welcome.title')}</h1>
-```
-
-## 🙏 Acknowledgments
-
-- **OpenEPI** for providing agricultural APIs
-- **MongoDB** for database support
-
+* This prototype was created by **Mann Vaswani** and **Abhinav Bajpai** for the OpenEPI Hackathon 2025.
+* Special thanks to **OpenEPI** for providing the crucial agricultural APIs and the opportunity to build a solution with real-world impact.
 
 ---
 
