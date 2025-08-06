@@ -11,6 +11,10 @@ const morgan = require('morgan');
 const compression = require('compression');
 const mongoSanitize = require('express-mongo-sanitize');
 const hpp = require('hpp');
+const https = require('https');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const { connectDB } = require('./config/database');
 const { errorHandler } = require('./middleware/errorHandler');
@@ -57,7 +61,16 @@ const corsOptions = {
     // Parse CORS origins from environment variable
     const allowedOrigins = process.env.CORS_ORIGINS 
       ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
-      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'];
+      : [
+          'http://localhost:3000', 
+          'http://localhost:3001', 
+          'http://127.0.0.1:3000', 
+          'http://127.0.0.1:3001',
+          'https://localhost:3000',
+          'https://localhost:3001',
+          'https://127.0.0.1:3000',
+          'https://127.0.0.1:3001'
+        ];
     
     // Log CORS configuration for debugging
     if (process.env.NODE_ENV === 'development') {
@@ -148,44 +161,124 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
+// SSL Configuration
+const getSSLConfig = () => {
+  const sslEnabled = process.env.SSL_ENABLED === 'true';
+  
+  if (!sslEnabled) {
+    return null;
+  }
+
+  const certPath = process.env.SSL_CERT_PATH || path.join(__dirname, 'ssl', 'cert.pem');
+  const keyPath = process.env.SSL_KEY_PATH || path.join(__dirname, 'ssl', 'key.pem');
+
+  try {
+    if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+      const sslConfig = {
+        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(keyPath)
+      };
+      
+      // Add CA certificate only if it exists and is specified
+      if (process.env.SSL_CA_PATH && fs.existsSync(process.env.SSL_CA_PATH)) {
+        sslConfig.ca = fs.readFileSync(process.env.SSL_CA_PATH);
+      }
+      
+      return sslConfig;
+    } else {
+      logger.warn('SSL certificates not found. HTTPS will be disabled.');
+      return null;
+    }
+  } catch (error) {
+    logger.error('Error loading SSL certificates:', error.message);
+    return null;
+  }
+};
+
 // Start server
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || 'localhost';
+const SSL_ENABLED = process.env.SSL_ENABLED === 'true';
+const SSL_PORT = process.env.SSL_PORT || 5001;
 
-const server = app.listen(PORT, HOST, () => {
-  logger.info(`AgriSphere Backend running on ${HOST}:${PORT} in ${process.env.NODE_ENV} mode`);
+const sslConfig = getSSLConfig();
+
+if (SSL_ENABLED && sslConfig) {
+  // Create HTTPS server
+  const httpsServer = https.createServer(sslConfig, app);
   
-  // Initialize notification service after server starts
-  const notificationService = require('./services/notificationService');
-  notificationService.initialize();
-});
+  httpsServer.listen(SSL_PORT, HOST, () => {
+    logger.info(`AgriSphere Backend HTTPS running on https://${HOST}:${SSL_PORT} in ${process.env.NODE_ENV} mode`);
+    
+    // Initialize notification service after server starts
+    const notificationService = require('./services/notificationService');
+    notificationService.initialize();
+  });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  logger.error('Unhandled Promise Rejection:', err);
-  server.close(() => {
+  // Also start HTTP server for redirects (optional)
+  if (process.env.HTTP_REDIRECT === 'true') {
+    const httpApp = express();
+    httpApp.use((req, res) => {
+      res.redirect(`https://${req.headers.host}${req.url}`);
+    });
+    
+    const httpServer = http.createServer(httpApp);
+    httpServer.listen(PORT, HOST, () => {
+      logger.info(`HTTP redirect server running on http://${HOST}:${PORT}`);
+    });
+  }
+} else {
+  // Create HTTP server
+  const server = app.listen(PORT, HOST, () => {
+    logger.info(`AgriSphere Backend HTTP running on http://${HOST}:${PORT} in ${process.env.NODE_ENV} mode`);
+    
+    // Initialize notification service after server starts
+    const notificationService = require('./services/notificationService');
+    notificationService.initialize();
+  });
+
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', (err) => {
+    logger.error('Unhandled Promise Rejection:', err);
+    server.close(() => {
+      const notificationService = require('./services/notificationService');
+      notificationService.stopAll();
+      process.exit(1);
+    });
+  });
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught Exception:', err);
     const notificationService = require('./services/notificationService');
     notificationService.stopAll();
     process.exit(1);
   });
-});
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught Exception:', err);
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM received, shutting down gracefully');
+    server.close(() => {
+      const notificationService = require('./services/notificationService');
+      notificationService.stopAll();
+      process.exit(0);
+    });
+  });
+}
+
+// Global error handling for both HTTP and HTTPS servers
+process.on('unhandledRejection', (err) => {
+  logger.error('Unhandled Promise Rejection:', err);
   const notificationService = require('./services/notificationService');
   notificationService.stopAll();
   process.exit(1);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    const notificationService = require('./services/notificationService');
-    notificationService.stopAll();
-    process.exit(0);
-  });
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  const notificationService = require('./services/notificationService');
+  notificationService.stopAll();
+  process.exit(1);
 });
 
 module.exports = app;

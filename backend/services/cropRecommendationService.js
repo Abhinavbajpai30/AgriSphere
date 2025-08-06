@@ -523,27 +523,51 @@ class CropRecommendationService {
    * Calculate soil suitability score
    */
   calculateSoilScore(crop, soilData) {
-    // pH score
-    const phScore = this.getScoreInRange(
-      soilData.ph,
-      crop.soil.ph.min,
-      crop.soil.ph.max
-    );
+    let totalScore = 0;
+    let scoreCount = 0;
 
-    // Soil type score
-    const typeScore = crop.soil.type.includes(soilData.type) ? 100 : 60;
+    // pH score (if available)
+    if (soilData.ph !== undefined && soilData.ph !== null) {
+      const phScore = this.getScoreInRange(
+        soilData.ph,
+        crop.soil.ph.min,
+        crop.soil.ph.max
+      );
+      totalScore += phScore;
+      scoreCount++;
+    }
 
-    // Drainage score
-    const drainageScore = crop.soil.drainage === soilData.drainage ? 100 : 70;
+    // Soil type score (if available)
+    if (soilData.type && crop.soil.type) {
+      const typeScore = crop.soil.type.includes(soilData.type) ? 100 : 60;
+      totalScore += typeScore;
+      scoreCount++;
+    }
 
-    // Organic matter score
-    const omScore = this.getScoreInRange(
-      soilData.organicMatter,
-      crop.soil.organicMatter.min,
-      crop.soil.organicMatter.max
-    );
+    // Drainage score (if available)
+    if (soilData.drainage && crop.soil.drainage) {
+      const drainageScore = crop.soil.drainage === soilData.drainage ? 100 : 70;
+      totalScore += drainageScore;
+      scoreCount++;
+    }
 
-    return (phScore + typeScore + drainageScore + omScore) / 4;
+    // Organic matter score (if available)
+    if (soilData.organicMatter !== undefined && soilData.organicMatter !== null) {
+      const omScore = this.getScoreInRange(
+        soilData.organicMatter,
+        crop.soil.organicMatter.min,
+        crop.soil.organicMatter.max
+      );
+      totalScore += omScore;
+      scoreCount++;
+    }
+
+    // If no soil data available, return a neutral score
+    if (scoreCount === 0) {
+      return 70; // Neutral score when no soil data
+    }
+
+    return totalScore / scoreCount;
   }
 
   /**

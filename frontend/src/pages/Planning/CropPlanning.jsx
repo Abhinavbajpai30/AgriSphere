@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   SparklesIcon,
@@ -16,7 +16,8 @@ import {
   ThumbsDownIcon,
   ClockIcon,
   DollarSignIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  X
 } from 'lucide-react';
 import apiService, { farmApi } from '../../services/api';
 import PlantGrowthAnimation from '../../components/Common/PlantGrowthAnimation';
@@ -37,6 +38,27 @@ const CropPlanning = () => {
     marketAccess: 'local',
     riskTolerance: 'medium'
   });
+
+  // Optimized hover handlers to prevent unnecessary re-renders
+  const handleHover = useCallback((crop) => {
+    setHoveredCrop(crop);
+  }, []);
+
+  const handleHoverEnd = useCallback(() => {
+    // Add a small delay to ensure smooth transitions
+    setTimeout(() => {
+      setHoveredCrop(null);
+    }, 50);
+  }, []);
+
+  const handleCropSelect = useCallback((crop) => {
+    setSelectedCrop(crop);
+  }, []);
+
+  // Stable key for recommendations to prevent re-renders
+  const recommendationsKey = useCallback(() => {
+    return recommendations?.topRecommendations?.map(crop => crop.cropKey).join('-') || '';
+  }, [recommendations?.topRecommendations]);
 
   // Fetch farms from API
   useEffect(() => {
@@ -91,7 +113,7 @@ const CropPlanning = () => {
         farmId: selectedFarm.id,
         ...userPreferences
       });
-              setRecommendations(response.data.data || response.data);
+              setRecommendations(response.data.message || response.data);
     } catch (error) {
       console.error('Error fetching recommendations:', error);
       // Use mock data for demo
@@ -191,32 +213,28 @@ const CropPlanning = () => {
     }
   };
 
-  const CropCard = ({ crop, index, isHovered, onHover, onSelect }) => {
+  const CropCard = ({ crop, index, isHovered, onHover, onHoverEnd, onSelect }) => {
     const badge = getRecommendationBadge(crop.recommendation);
 
-  return (
+    const handleViewDetails = useCallback((e) => {
+      e.stopPropagation(); // Prevent card click
+      onSelect(crop);
+    }, [onSelect, crop]);
+
+    return (
       <motion.div
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: index * 0.1 }}
         whileHover={{ scale: 1.05, y: -10 }}
         onHoverStart={() => onHover(crop)}
-        onHoverEnd={() => onHover(null)}
-        onClick={() => onSelect(crop)}
+        onHoverEnd={onHoverEnd}
+        onMouseLeave={onHoverEnd}
         className="relative cursor-pointer group"
       >
         <div className="bg-white rounded-3xl overflow-hidden shadow-xl border border-white/40 h-80">
           {/* Crop Image */}
           <div className="relative h-48 bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden">
-            {isHovered ? (
-              <PlantGrowthAnimation 
-                isActive={true}
-                cropType={crop.cropKey}
-                size="medium"
-              />
-            ) : (
-              <SproutIcon className="w-24 h-24 text-white opacity-80" />
-            )}
+            {/* Use simple icon instead of animation to prevent re-renders */}
+            <SproutIcon className="w-24 h-24 text-white opacity-80" />
+            
             <div className="absolute top-4 right-4">
               <div className={`${badge.color} text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center space-x-1`}>
                 <span>{badge.icon}</span>
@@ -263,6 +281,7 @@ const CropPlanning = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
+                onMouseLeave={onHoverEnd}
                 className="absolute inset-0 bg-black/80 flex items-center justify-center p-6"
               >
                 <div className="text-center text-white">
@@ -275,6 +294,7 @@ const CropPlanning = () => {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
+                    onClick={handleViewDetails}
                     className="mt-4 bg-white text-black px-4 py-2 rounded-full text-sm font-semibold"
                   >
                     View Details
@@ -604,18 +624,19 @@ const CropPlanning = () => {
                 <span>Top 3 Recommendations</span>
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" key={recommendationsKey()}>
                 {recommendations?.topRecommendations?.map((crop, index) => (
                   <CropCard
-                    key={crop.cropKey}
+                    key={`crop-${crop.cropKey}-${index}`}
                     crop={crop}
                     index={index}
                     isHovered={hoveredCrop?.cropKey === crop.cropKey}
-                    onHover={setHoveredCrop}
-                    onSelect={setSelectedCrop}
+                    onHover={handleHover}
+                    onHoverEnd={handleHoverEnd}
+                    onSelect={handleCropSelect}
                   />
                 ))}
-                          </div>
+              </div>
             </motion.div>
 
             {/* Seasonal Calendar */}
@@ -728,6 +749,160 @@ const CropPlanning = () => {
                 </div>
               </motion.div>
             )}
+
+            {/* Crop Details Modal */}
+            <AnimatePresence>
+              {selectedCrop && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+                  onClick={() => setSelectedCrop(null)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-white rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+                  >
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold text-gray-800">{selectedCrop.name}</h2>
+                      <button
+                        onClick={() => setSelectedCrop(null)}
+                        className="text-gray-500 hover:text-gray-700"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Basic Info */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Basic Information</h3>
+                        <div className="space-y-3">
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Scientific Name:</span>
+                            <span className="font-medium">{selectedCrop.scientificName}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Category:</span>
+                            <span className="font-medium capitalize">{selectedCrop.category}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Duration:</span>
+                            <span className="font-medium">{selectedCrop.growing.duration} days</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Difficulty:</span>
+                            <span className="font-medium capitalize">{selectedCrop.growing.difficulty}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Water Need:</span>
+                            <span className="font-medium capitalize">{selectedCrop.growing.waterNeed}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Economics */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Economics</h3>
+                        <div className="space-y-3">
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Expected Revenue:</span>
+                            <span className="font-medium">₹{selectedCrop.profitProjection.revenue.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Investment:</span>
+                            <span className="font-medium">₹{selectedCrop.profitProjection.investment.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Profit:</span>
+                            <span className="font-medium text-green-600">₹{selectedCrop.profitProjection.profit.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Profit Margin:</span>
+                            <span className="font-medium">{selectedCrop.profitProjection.margin}%</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">ROI:</span>
+                            <span className="font-medium">{selectedCrop.profitProjection.roi}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Benefits */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Benefits</h3>
+                        <ul className="space-y-2">
+                          {selectedCrop.benefits?.map((benefit, index) => (
+                            <li key={index} className="flex items-start space-x-2">
+                              <CheckCircleIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                              <span className="text-gray-700">{benefit}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Challenges */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Challenges</h3>
+                        <ul className="space-y-2">
+                          {selectedCrop.challenges?.map((challenge, index) => (
+                            <li key={index} className="flex items-start space-x-2">
+                              <AlertTriangleIcon className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                              <span className="text-gray-700">{challenge}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Risk Factors */}
+                      <div className="md:col-span-2">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Risk Factors</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                          {Object.entries(selectedCrop.riskFactors || {}).map(([risk, level]) => (
+                            <div key={risk} className="bg-gray-50 p-3 rounded-lg">
+                              <div className="text-sm font-medium text-gray-800 capitalize">{risk}</div>
+                              <div className={`text-xs font-semibold mt-1 ${
+                                level === 'high' || level === 'very_high' ? 'text-red-600' :
+                                level === 'medium' ? 'text-yellow-600' : 'text-green-600'
+                              }`}>
+                                {level.replace('_', ' ')}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Water Requirements */}
+                      <div className="md:col-span-2">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Water Requirements</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-blue-50 p-4 rounded-lg">
+                            <div className="text-sm text-gray-600">Total Water</div>
+                            <div className="text-lg font-semibold text-blue-600">{selectedCrop.waterRequirement.total}mm</div>
+                          </div>
+                          <div className="bg-green-50 p-4 rounded-lg">
+                            <div className="text-sm text-gray-600">Natural Rainfall</div>
+                            <div className="text-lg font-semibold text-green-600">{selectedCrop.waterRequirement.naturalRainfall}mm</div>
+                          </div>
+                          <div className="bg-orange-50 p-4 rounded-lg">
+                            <div className="text-sm text-gray-600">Irrigation Needed</div>
+                            <div className="text-lg font-semibold text-orange-600">{selectedCrop.waterRequirement.irrigationNeeded}mm</div>
+                          </div>
+                          <div className="bg-purple-50 p-4 rounded-lg">
+                            <div className="text-sm text-gray-600">Efficiency</div>
+                            <div className="text-lg font-semibold text-purple-600">{(selectedCrop.waterRequirement.efficiency * 100).toFixed(1)}%</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </>
         )}
       </div>

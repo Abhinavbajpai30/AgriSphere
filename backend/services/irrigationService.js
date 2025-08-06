@@ -177,6 +177,40 @@ class IrrigationService {
   }
 
   /**
+   * Get soil type data from OpenEPI
+   */
+  async getSoilType(latitude, longitude) {
+    try {
+      const response = await axios.get(
+        'https://api.openepi.io/soil/type',
+        {
+          params: { 
+            lat: latitude, 
+            lon: longitude
+          },
+          headers: {
+            'User-Agent': 'AgriSphere/1.0'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (response.data && response.data.properties && response.data.properties.most_probable_soil_type) {
+        return {
+          soilType: response.data.properties.most_probable_soil_type,
+          source: 'OpenEPI'
+        };
+      } else {
+        throw new Error('No soil type data available for this location');
+      }
+
+    } catch (error) {
+      logger.error('Failed to get soil type data', { error: error.message });
+      throw new ApiError(`Soil type data unavailable: ${error.message}`, 503);
+    }
+  }
+
+  /**
    * Get soil data from OpenEPI
    */
   async getSoilData(latitude, longitude) {
@@ -273,55 +307,170 @@ class IrrigationService {
       fieldSize = 1 // hectares
     } = params;
 
-    try {
-      // Get weather and soil data
-      const [weatherData, soilData] = await Promise.all([
-        this.getWeatherForecast(latitude, longitude),
-        this.getSoilData(latitude, longitude)
-      ]);
-
-      // Calculate evapotranspiration
-      const etData = this.calculateEvapotranspiration(
-        weatherData.current,
-        cropType,
-        growthStage
-      );
-
-      // Calculate water balance
-      const waterBalance = this.calculateWaterBalance(
-        etData,
-        weatherData,
-        soilData,
-        soilType,
-        lastIrrigation
-      );
-
-      // Generate recommendation
-      const recommendation = this.generateIrrigationRecommendation(
-        waterBalance,
-        weatherData,
-        etData,
-        fieldSize
-      );
-
-      return {
-        recommendation,
-        waterBalance,
-        evapotranspiration: etData,
-        weather: weatherData,
-        soil: soilData,
-        metadata: {
-          calculatedAt: new Date(),
-          location: { latitude, longitude },
-          crop: { type: cropType, growthStage },
-          fieldSize
+    const result = {
+      recommendation: null,
+      waterBalance: null,
+      evapotranspiration: null,
+      weather: null,
+      soil: null,
+      metadata: {
+        calculatedAt: new Date(),
+        location: { latitude, longitude },
+        crop: { type: cropType, growthStage },
+        fieldSize,
+        dataAvailability: {
+          weather: false,
+          soil: false,
+          hasRealData: false
         }
-      };
+      }
+    };
 
-    } catch (error) {
-      logger.error('Failed to calculate irrigation recommendation', { error: error.message });
-      throw new ApiError('Irrigation calculation failed', 500);
+    let weatherData = null;
+    let soilData = null;
+    let soilTypeData = null;
+    let weatherError = null;
+    let soilError = null;
+    let soilTypeError = null;
+
+    // Try to get weather data
+    try {
+      weatherData = await this.getWeatherForecast(latitude, longitude);
+      result.metadata.dataAvailability.weather = true;
+      logger.info('Weather data retrieved successfully', { source: 'real' });
+    } catch (weatherError) {
+      logger.error('Weather API failed', { error: weatherError.message });
+      result.metadata.weatherError = weatherError.message;
     }
+
+    // Try to get soil data
+    try {
+      soilData = await this.getSoilData(latitude, longitude);
+      result.metadata.dataAvailability.soil = true;
+      logger.info('Soil data retrieved successfully', { source: 'real' });
+    } catch (soilError) {
+      logger.error('Soil API failed', { error: soilError.message });
+      result.metadata.soilError = soilError.message;
+    }
+
+    // Try to get soil type data
+    try {
+      soilTypeData = await this.getSoilType(latitude, longitude);
+      result.metadata.dataAvailability.soilType = true;
+      logger.info('Soil type data retrieved successfully', { source: 'real' });
+    } catch (soilTypeError) {
+      logger.error('Soil type API failed', { error: soilTypeError.message });
+      result.metadata.soilTypeError = soilTypeError.message;
+    }
+
+    // Update data availability
+    result.metadata.dataAvailability.hasRealData = (result.metadata.dataAvailability.weather && result.metadata.dataAvailability.soil);
+
+    // If both weather and soil data are unavailable, we cannot provide reliable recommendations
+    if (!weatherData && !soilData) {
+      throw new ApiError('Insufficient real data available. Both weather and soil data are required for irrigation recommendations.', 503);
+    }
+
+    // If weather data is missing, we cannot calculate ET properly
+    if (!weatherData) {
+      throw new ApiError('Weather data unavailable. Real-time weather data is required for accurate irrigation calculations.', 503);
+    }
+
+    // If soil data is missing, we can still provide basic recommendations but with limitations
+    if (!soilData) {
+      logger.warn('Soil data unavailable - providing limited recommendations', { 
+        weatherAvailable: !!weatherData,
+        soilError: soilError?.message 
+      });
+      
+      // Use default soil properties for basic calculations
+      soilData = {
+        type: soilType || 'unknown',
+        waterHoldingCapacity: this.soilWaterCapacity[soilType] || this.soilWaterCapacity.unknown,
+        drainage: 'moderate',
+        source: 'default'
+      };
+      
+      result.metadata.warnings = ['Soil data unavailable - using default soil properties. Recommendations may be less accurate.'];
+    }
+
+    // Enhance soil data with soil type information if available
+    if (soilTypeData && soilData) {
+      // Use the professional soil classification as the primary type
+      soilData.type = soilTypeData.soilType;
+      soilData.soilType = soilTypeData.soilType;
+      soilData.soilTypeSource = soilTypeData.source;
+    } else if (soilTypeData && !soilData) {
+      // If we have soil type but no other soil data, create basic soil data
+      soilData = {
+        type: soilTypeData.soilType, // Use professional classification as primary
+        soilType: soilTypeData.soilType,
+        soilTypeSource: soilTypeData.source,
+        waterHoldingCapacity: this.soilWaterCapacity.unknown,
+        drainage: 'moderate',
+        source: 'limited'
+      };
+      
+      if (!result.metadata.warnings) {
+        result.metadata.warnings = [];
+      }
+      result.metadata.warnings.push('Limited soil data - using soil type information only');
+    }
+
+    // Calculate evapotranspiration
+    const etData = this.calculateEvapotranspiration(
+      weatherData.current,
+      cropType,
+      growthStage
+    );
+
+    // Calculate water balance
+    const waterBalance = this.calculateWaterBalance(
+      etData,
+      weatherData,
+      soilData,
+      soilType,
+      lastIrrigation
+    );
+
+    // Generate recommendation
+    const recommendation = this.generateIrrigationRecommendation(
+      waterBalance,
+      weatherData,
+      etData,
+      fieldSize
+    );
+
+    // Add data source information to the result
+    result.recommendation = {
+      ...recommendation,
+      dataSource: {
+        weather: weatherData ? 'real' : 'unavailable',
+        soil: soilData && soilData.source !== 'default' ? 'real' : 'limited',
+        soilType: soilTypeData ? 'real' : 'unavailable',
+        reliability: result.metadata.dataAvailability.hasRealData ? 'high' : 'limited'
+      }
+    };
+
+    result.waterBalance = waterBalance;
+    result.evapotranspiration = etData;
+    result.weather = weatherData ? {
+      ...weatherData,
+      source: 'real'
+    } : null;
+    result.soil = soilData ? {
+      ...soilData,
+      source: soilData.source === 'default' ? 'limited' : 'real'
+    } : null;
+
+    logger.info('Irrigation recommendation calculated', { 
+      weatherAvailable: !!weatherData,
+      soilAvailable: !!soilData,
+      hasRealData: result.metadata.dataAvailability.hasRealData,
+      recommendationStatus: recommendation.status
+    });
+
+    return result;
   }
 
   /**
@@ -628,7 +777,7 @@ class IrrigationService {
           temperature: details.air_temperature,
           humidity: details.relative_humidity,
           windSpeed: details.wind_speed,
-          precipitation: next6h ? next6h.details.precipitation_amount : 0,
+          precipitation: next6h ? (next6h.details?.precipitation_amount || next6h.details?.precipitation || 0) : 0,
           summary: next6h ? next6h.summary.symbol_code : 'fair_day'
         };
       });
@@ -682,8 +831,7 @@ class IrrigationService {
         if (!hasTextureData) {
           // Log what data is available
           logger.warn('Limited soil data available', { 
-            availableProperties: Object.keys(availableData),
-            location: { latitude, longitude }
+            availableProperties: Object.keys(availableData)
           });
           
           // Check if we have at least organic matter or other usable properties

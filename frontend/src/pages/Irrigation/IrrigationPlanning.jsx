@@ -171,6 +171,35 @@ const IrrigationPlanning = () => {
     }
   };
 
+  const getDataReliabilityColor = (reliability) => {
+    switch (reliability) {
+      case 'high': return 'text-green-600 bg-green-100';
+      case 'limited': return 'text-yellow-600 bg-yellow-100';
+      case 'low': return 'text-red-600 bg-red-100';
+      default: return 'text-gray-600 bg-gray-100';
+    }
+  };
+
+  const getDataSourceBadge = (source) => {
+    switch (source) {
+      case 'real':
+        return null; // No badge for real data - cleaner interface
+      case 'limited':
+        return (
+          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+            Limited Data
+          </span>
+        );
+      case 'unavailable':
+        return (
+          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+            Unavailable
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
 
 
   const renderFarmSelection = () => (
@@ -312,6 +341,35 @@ const IrrigationPlanning = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 p-4">
+            {/* Data Reliability Warning */}
+            {recommendation?.metadata?.warnings && recommendation.metadata.warnings.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="lg:col-span-3 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-2xl p-6 text-white shadow-lg"
+              >
+                <div className="flex items-center space-x-3 mb-3">
+                  <AlertTriangleIcon className="w-6 h-6" />
+                  <h3 className="text-lg font-semibold">Limited Data Available</h3>
+                </div>
+                <div className="space-y-2">
+                  {recommendation.metadata.warnings.map((warning, index) => (
+                    <p key={index} className="text-white/90">• {warning}</p>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-center space-x-4">
+                  <span className="text-sm text-white/80">Data Reliability:</span>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    getDataReliabilityColor(recommendation?.metadata?.dataReliability || 'unknown')
+                  }`}>
+                    {recommendation?.metadata?.dataReliability === 'high' ? 'High' :
+                     recommendation?.metadata?.dataReliability === 'limited' ? 'Limited' :
+                     recommendation?.metadata?.dataReliability === 'low' ? 'Low' : 'Unknown'}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+
             {/* Main Status Card */}
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
@@ -333,6 +391,12 @@ const IrrigationPlanning = () => {
                            'Monitor Status'}
                         </h2>
                         <p className="text-white/80">Priority: {recommendation?.recommendation?.priority}</p>
+                        {/* Data Source Indicators */}
+                        <div className="flex items-center space-x-2 mt-2">
+                          {getDataSourceBadge(recommendation?.recommendation?.dataSource?.weather)}
+                          {getDataSourceBadge(recommendation?.recommendation?.dataSource?.soil)}
+                          {getDataSourceBadge(recommendation?.recommendation?.dataSource?.soilType)}
+                        </div>
                       </div>
                     </div>
                     
@@ -592,29 +656,32 @@ const IrrigationPlanning = () => {
               )}
 
               {/* Soil Details */}
-              {recommendation?.soil && (
+              {recommendation?.soil ? (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 }}
                   className="bg-white rounded-3xl p-6 shadow-2xl border-2 border-gray-100 hover:shadow-3xl transition-shadow duration-300"
                 >
-                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center space-x-2">
-                    <BeakerIcon className="w-5 h-5 text-brown-500" />
-                    <span>Soil Properties</span>
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-800 flex items-center space-x-2">
+                      <BeakerIcon className="w-5 h-5 text-brown-500" />
+                      <span>Soil Properties</span>
+                    </h3>
+                    {getDataSourceBadge(recommendation.soil.source)}
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-gray-600">Soil Type</p>
-                      <p className="font-semibold text-gray-800 capitalize">{recommendation.soil.type}</p>
+                      <p className="font-semibold text-gray-800 capitalize">{recommendation.soil.type || 'Unknown'}</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">pH Level</p>
-                      <p className="font-semibold text-gray-800">{recommendation.soil.ph}</p>
+                      <p className="font-semibold text-gray-800">{recommendation.soil.ph || 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">Organic Matter</p>
-                      <p className="font-semibold text-gray-800">{recommendation.soil.organicMatter}%</p>
+                      <p className="font-semibold text-gray-800">{recommendation.soil.organicMatter || 'N/A'}%</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600">Drainage</p>
@@ -624,6 +691,28 @@ const IrrigationPlanning = () => {
                       <p className="text-sm text-gray-600">Water Holding Capacity</p>
                       <p className="font-semibold text-gray-800">{recommendation.soil.waterHoldingCapacity} mm/m</p>
                     </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="bg-white rounded-3xl p-6 shadow-2xl border-2 border-gray-100"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-gray-800 flex items-center space-x-2">
+                      <BeakerIcon className="w-5 h-5 text-brown-500" />
+                      <span>Soil Properties</span>
+                    </h3>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      Unavailable
+                    </span>
+                  </div>
+                  <div className="text-center py-4 text-gray-500">
+                    <BeakerIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                    <p className="font-medium">Soil data unavailable</p>
+                    <p className="text-sm mt-1">Soil composition data is required for accurate irrigation calculations</p>
                   </div>
                 </motion.div>
               )}
@@ -638,12 +727,15 @@ const IrrigationPlanning = () => {
               className="space-y-8"
             >
               {/* Current Weather */}
-              {weatherForecast?.current && (
+              {weatherForecast?.current ? (
                 <div className="bg-white rounded-3xl p-6 shadow-2xl border-2 border-gray-100 hover:shadow-3xl transition-shadow duration-300">
-                  <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center space-x-2">
-                    <SunIcon className="w-6 h-6 text-yellow-500" />
-                    <span>Current Weather</span>
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
+                      <SunIcon className="w-6 h-6 text-yellow-500" />
+                      <span>Current Weather</span>
+                    </h3>
+                    {getDataSourceBadge(weatherForecast.source)}
+                  </div>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-600">Temperature</span>
@@ -665,12 +757,33 @@ const IrrigationPlanning = () => {
                     )}
                   </div>
                 </div>
+              ) : (
+                <div className="bg-white rounded-3xl p-6 shadow-2xl border-2 border-gray-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
+                      <SunIcon className="w-6 h-6 text-yellow-500" />
+                      <span>Current Weather</span>
+                    </h3>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      Unavailable
+                    </span>
+                  </div>
+                  <div className="text-center py-4 text-gray-500">
+                    <CloudIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                    <p className="font-medium">Weather data unavailable</p>
+                    <p className="text-sm mt-1">Real-time weather data is required for irrigation calculations</p>
+                  </div>
+                </div>
               )}
+
               <div className="bg-white rounded-3xl p-6 shadow-2xl border-2 border-gray-100 hover:shadow-3xl transition-shadow duration-300">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center space-x-2">
-                  <TrendingUpIcon className="w-6 h-6 text-blue-500" />
-                  <span>7-Day Forecast</span>
-                </h3>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold text-gray-800 flex items-center space-x-2">
+                    <TrendingUpIcon className="w-6 h-6 text-blue-500" />
+                    <span>7-Day Forecast</span>
+                  </h3>
+                  {weatherForecast?.source && getDataSourceBadge(weatherForecast.source)}
+                </div>
 
                 <div className="space-y-4">
                   {weatherForecast?.forecast && weatherForecast.forecast.length > 0 ? (
@@ -695,7 +808,19 @@ const IrrigationPlanning = () => {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-blue-600 font-semibold">{typeof day.precipitation === 'object' ? day.precipitation?.value || 'N/A' : day.precipitation || 'N/A'}mm</div>
+                          <div className="text-blue-600 font-semibold">
+                            {(() => {
+                              let precipValue = 'N/A';
+                              if (typeof day.precipitation === 'object' && day.precipitation !== null) {
+                                precipValue = day.precipitation.value || day.precipitation.amount || 'N/A';
+                              } else if (typeof day.precipitation === 'number') {
+                                precipValue = day.precipitation;
+                              } else if (day.precipitation !== null && day.precipitation !== undefined) {
+                                precipValue = day.precipitation;
+                              }
+                              return precipValue === 'N/A' ? 'N/A' : `${precipValue}mm`;
+                            })()}
+                          </div>
                           <div className="text-xs text-gray-500">Rain</div>
                       </div>
                       </motion.div>
@@ -703,7 +828,8 @@ const IrrigationPlanning = () => {
                   ) : (
                     <div className="text-center py-4 text-gray-500">
                       <CloudIcon className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                      <p>Weather forecast data not available</p>
+                      <p className="font-medium">Weather forecast data not available</p>
+                      <p className="text-sm mt-1">Real-time forecast data is required</p>
                     </div>
                   )}
                   </div>

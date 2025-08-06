@@ -28,6 +28,8 @@ const CropDiagnosis = () => {
   const [uploadId, setUploadId] = useState(null)
   const [error, setError] = useState(null)
   const [showCelebration, setShowCelebration] = useState(false)
+  const [currentSymptomStep, setCurrentSymptomStep] = useState(0)
+  const [symptomResponses, setSymptomResponses] = useState({})
   
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -51,6 +53,27 @@ const CropDiagnosis = () => {
       }
     }
   }, [stream])
+
+  // Hide header and navigation when camera is active
+  useEffect(() => {
+    if (currentStep === 'camera') {
+      document.body.classList.add('camera-active')
+      // Also add class to any floating navigation elements
+      const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
+      floatingNavs.forEach(nav => nav.classList.add('camera-hidden'))
+    } else {
+      document.body.classList.remove('camera-active')
+      // Remove class from floating navigation elements
+      const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
+      floatingNavs.forEach(nav => nav.classList.remove('camera-hidden'))
+    }
+
+    return () => {
+      document.body.classList.remove('camera-active')
+      const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
+      floatingNavs.forEach(nav => nav.classList.remove('camera-hidden'))
+    }
+  }, [currentStep])
 
   const startCamera = async () => {
     try {
@@ -328,6 +351,8 @@ const CropDiagnosis = () => {
                 startCamera()
               } else if (method.id === 'upload') {
                 fileInputRef.current?.click()
+              } else if (method.id === 'symptoms') {
+                setCurrentStep('symptoms')
               }
             }}
             className="bg-white rounded-3xl p-6 shadow-lg border border-white/40 cursor-pointer hover:shadow-xl transition-all duration-300 relative overflow-hidden"
@@ -376,27 +401,19 @@ const CropDiagnosis = () => {
   // Render Camera Interface
   const renderCameraInterface = () => (
     <div className="min-h-screen bg-black relative">
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-20 p-6 bg-gradient-to-b from-black/50 to-transparent">
-        <div className="flex items-center justify-between">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={resetDiagnosis}
-            className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center"
-          >
-            <ArrowLeftIcon className="w-5 h-5 text-white" />
-          </motion.button>
-          
-          <div className="text-center">
-            <h2 className="text-white font-semibold">AI Crop Doctor</h2>
-            <p className="text-white/80 text-sm">Position plant in center frame</p>
-          </div>
-          
-          <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-            <span className="text-white text-sm">{capturedImages.length}</span>
-          </div>
-        </div>
+      {/* Back Button - Floating */}
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        onClick={resetDiagnosis}
+        className="absolute top-6 left-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20"
+      >
+        <ArrowLeftIcon className="w-6 h-6 text-white" />
+      </motion.button>
+
+      {/* Image Counter - Floating */}
+      <div className="absolute top-6 right-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20">
+        <span className="text-white text-sm font-semibold">{capturedImages.length}</span>
       </div>
 
       {/* Camera View */}
@@ -423,13 +440,13 @@ const CropDiagnosis = () => {
               repeat: Infinity,
               ease: "easeInOut"
             }}
-            className="w-64 h-64 border-4 border-white/50 rounded-3xl"
+            className="w-72 h-72 border-4 border-white/60 rounded-3xl"
           />
           
           {/* Center Guidelines */}
-          <div className="absolute w-64 h-64 pointer-events-none">
-            <div className="absolute top-1/2 left-0 right-0 h-px bg-white/30"></div>
-            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/30"></div>
+          <div className="absolute w-72 h-72 pointer-events-none">
+            <div className="absolute top-1/2 left-0 right-0 h-px bg-white/40"></div>
+            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/40"></div>
           </div>
         </div>
 
@@ -437,49 +454,49 @@ const CropDiagnosis = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="absolute bottom-40 left-0 right-0 text-center px-6"
+          className="absolute bottom-32 left-0 right-0 text-center px-6 z-10"
         >
           <p className="text-white text-lg font-medium mb-2">🌱 Perfect!</p>
           <p className="text-white/80">Center the plant and ensure good lighting</p>
         </motion.div>
 
         {/* Bottom Controls */}
-        <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/50 to-transparent">
-          <div className="flex items-center justify-between">
-            {/* Gallery Preview */}
-            <div className="flex space-x-2">
+        <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
+          <div className="flex items-center relative">
+            {/* Gallery Preview - Left */}
+            <div className="flex space-x-3 absolute left-0">
               {capturedImages.slice(-3).map((img, index) => (
                 <motion.div
                   key={img.id}
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="w-12 h-12 rounded-lg overflow-hidden border-2 border-white/30"
+                  className="w-14 h-14 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg"
                 >
                   <img src={img.preview} alt="" className="w-full h-full object-cover" />
                 </motion.div>
               ))}
             </div>
 
-            {/* Capture Button */}
+            {/* Capture Button - Center */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               onClick={capturePhoto}
               disabled={!isCameraReady}
-              className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg disabled:opacity-50"
+              className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-2xl disabled:opacity-50 absolute left-1/2 transform -translate-x-1/2"
             >
-              <div className="w-16 h-16 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full flex items-center justify-center">
-                <CameraIcon className="w-8 h-8 text-white" />
+              <div className="w-20 h-20 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full flex items-center justify-center">
+                <CameraIcon className="w-10 h-10 text-white" />
               </div>
             </motion.button>
 
-            {/* Analyze Button */}
+            {/* Analyze Button - Right */}
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={uploadImages}
               disabled={capturedImages.length === 0}
-              className="px-6 py-3 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full text-white font-semibold shadow-lg disabled:opacity-50"
+              className="px-8 py-4 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full text-white font-semibold shadow-lg disabled:opacity-50 text-lg absolute right-0"
             >
               Analyze ({capturedImages.length})
             </motion.button>
@@ -734,6 +751,74 @@ const CropDiagnosis = () => {
     </div>
   )
 
+  // Render Symptom Checker Interface
+  const renderSymptomChecker = () => {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-green-50 p-6">
+        <div className="max-w-2xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-8"
+          >
+            <div className="flex items-center justify-center space-x-3 mb-4">
+              <motion.div
+                animate={{ rotate: [0, 360] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                className="w-12 h-12 bg-gradient-to-r from-orange-400 to-yellow-500 rounded-full flex items-center justify-center"
+              >
+                <MagnifyingGlassIcon className="w-6 h-6 text-white" />
+              </motion.div>
+              <h1 className="text-3xl font-bold text-gray-800">Symptom Checker</h1>
+            </div>
+            <p className="text-gray-600">Coming Soon</p>
+          </motion.div>
+
+          {/* Coming Soon Card */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl p-12 shadow-xl border border-white/40 text-center"
+          >
+            <div className="text-8xl mb-6">🔧</div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-4">Feature Coming Soon</h2>
+            <p className="text-gray-600 mb-8 text-lg">
+              We're working hard to bring you an advanced symptom checker with AI-powered diagnosis. 
+              This feature will help you identify plant problems step-by-step.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="text-center">
+                <div className="text-4xl mb-2">🤖</div>
+                <h3 className="font-semibold text-gray-800 mb-2">AI-Powered</h3>
+                <p className="text-sm text-gray-600">Advanced machine learning for accurate diagnosis</p>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl mb-2">📋</div>
+                <h3 className="font-semibold text-gray-800 mb-2">Step-by-Step</h3>
+                <p className="text-sm text-gray-600">Guided questions for precise identification</p>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl mb-2">💡</div>
+                <h3 className="font-semibold text-gray-800 mb-2">Expert Advice</h3>
+                <p className="text-sm text-gray-600">Professional treatment recommendations</p>
+              </div>
+            </div>
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={resetDiagnosis}
+              className="bg-gradient-to-r from-orange-400 to-yellow-500 text-white font-semibold py-4 px-8 rounded-2xl shadow-lg"
+            >
+              Back to Diagnosis
+            </motion.button>
+          </motion.div>
+        </div>
+      </div>
+    )
+  }
+
   // Error Display
   if (error) {
     return (
@@ -763,6 +848,8 @@ const CropDiagnosis = () => {
   switch (currentStep) {
     case 'camera':
       return renderCameraInterface()
+    case 'symptoms':
+      return renderSymptomChecker()
     case 'analysis':
       return renderAnalysisProgress()
     case 'results':

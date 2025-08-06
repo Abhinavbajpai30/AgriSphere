@@ -8,6 +8,7 @@ import {
   StarIcon 
 } from '@heroicons/react/24/outline'
 import { apiService } from '../../services/api'
+import cacheService from '../../services/cacheService'
 import SuccessAnimation from '../Common/SuccessAnimation'
 
 const UrgentTaskCard = ({ task, onComplete }) => {
@@ -47,6 +48,14 @@ const UrgentTaskCard = ({ task, onComplete }) => {
       if (response.data?.status === 'success') {
         setIsCompleted(true)
         setShowSuccess(true)
+        
+        // Invalidate dashboard cache to ensure fresh data
+        try {
+          await cacheService.invalidate('/dashboard/overview')
+          console.log('Dashboard cache invalidated after task completion')
+        } catch (cacheError) {
+          console.warn('Failed to invalidate cache:', cacheError)
+        }
         
         // Hide success animation after 3 seconds
         setTimeout(() => {

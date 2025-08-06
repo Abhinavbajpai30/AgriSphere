@@ -12,12 +12,23 @@
   html {
     font-family: 'Inter', system-ui, sans-serif;
     scroll-behavior: smooth;
+    height: 100%;
+    margin: 0;
+    padding: 0;
   }
 
   body {
     @apply bg-gradient-to-br from-green-50 via-blue-50 to-orange-50 text-gray-900 antialiased;
-    min-height: 100vh;
+    height: 100vh;
     overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+  }
+
+  #root {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
   /* Custom scrollbar */
@@ -307,4 +318,15 @@
   .card {
     border: 2px solid #000;
   }
+}
+
+/* Camera interface styles - hide header and navigation when camera is active */
+body.camera-active header,
+body.camera-active nav,
+.camera-hidden {
+  display: none !important;
+}
+
+body.camera-active {
+  overflow: hidden;
 }

@@ -83,7 +83,8 @@ router.post('/recommendation', authenticateUser, [
     logger.info('Irrigation service call completed', { 
       hasRecommendation: !!recommendation,
       hasWeather: !!recommendation?.weather,
-      hasWaterBalance: !!recommendation?.waterBalance
+      hasWaterBalance: !!recommendation?.waterBalance,
+      dataAvailability: recommendation?.metadata?.dataAvailability
     });
 
     // Log the recommendation request
@@ -141,19 +142,32 @@ router.post('/recommendation', authenticateUser, [
       farmId,
       fieldId,
       status: recommendation.recommendation.status,
-      amount: recommendation.recommendation.amount
+      amount: recommendation.recommendation.amount,
+      dataReliability: recommendation.recommendation.dataSource?.reliability
     });
 
-    return success(res, 'Irrigation recommendation calculated successfully', {
+    // Determine response status based on data availability
+    const hasRealData = recommendation.metadata?.dataAvailability?.hasRealData;
+    const status = hasRealData ? 'success' : 'partial_success';
+    const message = hasRealData 
+      ? 'Irrigation recommendation calculated successfully' 
+      : 'Irrigation recommendation calculated with limited data';
+
+    return success(res, message, {
       recommendation: recommendation.recommendation || {},
       waterBalance: recommendation.waterBalance || {},
       evapotranspiration: recommendation.evapotranspiration || {},
       weather: {
         current: recommendation.weather?.current || {},
-        forecast: recommendation.weather?.forecast?.slice(0, 3) || [] // Next 3 days only
+        forecast: recommendation.weather?.forecast?.slice(0, 3) || [], // Next 3 days only
+        source: recommendation.weather?.source || 'unknown'
       },
       soil: recommendation.soil || {},
-      metadata: recommendation.metadata || {}
+      metadata: {
+        ...recommendation.metadata,
+        status: status,
+        dataReliability: recommendation.recommendation?.dataSource?.reliability || 'unknown'
+      }
     });
 
   } catch (err) {

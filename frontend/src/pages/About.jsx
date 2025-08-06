@@ -379,18 +379,12 @@ const About = () => {
             <p className="text-lg text-gray-700 mb-8">
               Experience the future of farming with AgriSphere's AI-powered tools
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex justify-center">
               <a
                 href="/register"
                 className="bg-emerald-600 text-white font-semibold py-4 px-8 rounded-2xl hover:bg-emerald-700 transition-colors text-lg shadow-lg"
               >
                 Get Started Today
-              </a>
-              <a
-                href="/"
-                className="border-2 border-emerald-600 text-emerald-600 font-semibold py-4 px-8 rounded-2xl hover:bg-emerald-50 transition-colors text-lg"
-              >
-                Learn More
               </a>
             </div>
           </motion.div>

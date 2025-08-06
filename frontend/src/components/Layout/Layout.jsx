@@ -48,7 +48,7 @@ const Layout = ({ children }) => {
   }
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative overflow-hidden min-h-screen">
       {/* Background decoration */}
       <div className="absolute inset-0 opacity-30">
         <div className="absolute top-0 left-0 w-72 h-72 bg-primary-200 rounded-full mix-blend-multiply filter blur-xl animate-blob"></div>
@@ -73,7 +73,7 @@ const Layout = ({ children }) => {
       <PWAPrompt />
 
       {/* Main Content */}
-      <main className={`relative z-10 ${showNavigation ? 'pb-20' : ''}`}>
+      <main className="relative z-10 flex-1">
         <AnimatePresence mode="wait">
           <motion.div
             key={location.pathname}
@@ -82,7 +82,7 @@ const Layout = ({ children }) => {
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="min-h-screen"
+            className="h-full"
           >
             {children}
           </motion.div>

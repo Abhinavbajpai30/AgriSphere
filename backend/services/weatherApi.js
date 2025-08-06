@@ -98,7 +98,7 @@ class WeatherApiService {
             windSpeed: details.wind_speed,
             windDirection: details.wind_from_direction,
             cloudiness: details.cloud_area_fraction,
-            precipitation: next6h?.details?.precipitation_amount || 0,
+            precipitation: next6h?.details?.precipitation_amount || next6h?.details?.precipitation || 0,
             description: next6h?.summary?.symbol_code || 'unknown',
             icon: next6h?.summary?.symbol_code || 'unknown'
           };

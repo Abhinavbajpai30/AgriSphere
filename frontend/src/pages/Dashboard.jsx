@@ -42,17 +42,34 @@ const Dashboard = () => {
     return () => clearInterval(timeInterval)
   }, [])
 
-  const fetchDashboardData = async () => {
+  // Debug effect to log dashboard data changes
+  useEffect(() => {
+    console.log('Dashboard data changed:', {
+      hasData: !!dashboardData,
+      hasActiveFarm: dashboardData?.hasActiveFarm,
+      isLoading,
+      timestamp: new Date().toISOString()
+    })
+  }, [dashboardData, isLoading])
+
+  const fetchDashboardData = async (forceRefresh = false) => {
     try {
-      console.log('Fetching dashboard data...')
+      console.log('Fetching dashboard data...', { forceRefresh })
       setIsLoading(true)
-      const response = await apiService.get('/dashboard/overview')
+      
+      // Add cache-busting parameter if force refresh is requested
+      const url = forceRefresh ? '/dashboard/overview?t=' + Date.now() : '/dashboard/overview'
+      const response = await apiService.get(url)
       console.log('Dashboard response:', response)
       
       if (response.data?.status === 'success') {
         // The actual data is in response.data.data, not response.data.message
-        setDashboardData(response.data.data || response.data)
-        console.log('Dashboard data set:', response.data.data || response.data)
+        const newData = response.data.data || response.data
+        console.log('Dashboard data set:', newData)
+        setDashboardData(newData)
+        
+        // Log the hasActiveFarm status for debugging
+        console.log('hasActiveFarm status:', newData?.hasActiveFarm)
       }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
@@ -298,7 +315,7 @@ const Dashboard = () => {
             >
               <UrgentTaskCard 
                 task={dashboardData?.tasks?.urgent?.[0]}
-                onComplete={() => fetchDashboardData()}
+                onComplete={() => fetchDashboardData(true)}
               />
             </motion.div>
 

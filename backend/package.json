@@ -13,7 +13,9 @@
     "lint:fix": "eslint . --fix",
     "setup": "node scripts/setup.js",
     "seed": "node scripts/seedData.js",
-    "healthcheck": "node healthcheck.js"
+    "healthcheck": "node healthcheck.js",
+    "ssl:generate": "node scripts/generate-ssl.js",
+    "ssl:dev": "npm run ssl:generate && SSL_ENABLED=true npm run dev"
   },
   "keywords": [
     "agriculture",
