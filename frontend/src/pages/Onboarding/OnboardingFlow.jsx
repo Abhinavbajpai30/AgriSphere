@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircleIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { onboardingApi } from '../../services/api'
 
 // Onboarding Step Components
 import LanguageSelection from './steps/LanguageSelection'
@@ -187,34 +188,33 @@ const OnboardingFlow = () => {
 
       console.log('Completing onboarding with data:', requestData)
       console.log('User authenticated:', isAuthenticated)
+      console.log('User data:', user)
+      console.log('Token exists:', !!localStorage.getItem('agrisphere_token'))
+      console.log('Token value:', localStorage.getItem('agrisphere_token')?.substring(0, 20) + '...')
 
       let response
       if (isAuthenticated && user) {
         // User is already logged in, update their profile and farm data
         console.log('Updating existing user profile')
-        response = await fetch('/api/onboarding/update', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('agrisphere_token')}`
-          },
-          body: JSON.stringify(requestData)
-        })
+        response = await onboardingApi.update(requestData)
       } else {
         // Create new user account and farm
         console.log('Creating new user account')
-        response = await fetch('/api/onboarding/complete', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestData)
-        })
+        response = await onboardingApi.complete(requestData)
       }
 
-      const data = await response.json()
+      const data = response.data
+      
+      console.log('Onboarding response:', {
+        status: response.status,
+        data: data,
+        responseOk: response.ok,
+        dataStatus: data.status,
+        nestedData: data.data
+      })
 
-      if (response.ok && data.status === 'success') {
+      // Check if the response has the expected structure
+      if (data.status === 'success') {
         // Store authentication token if it's a new user
         if (!isAuthenticated && data.data.token) {
           localStorage.setItem('agrisphere_token', data.data.token)
@@ -250,6 +250,12 @@ const OnboardingFlow = () => {
       }
     } catch (error) {
       console.error('Onboarding completion failed:', error)
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data
+      })
       showToast('Failed to complete onboarding. Please try again.', 'error')
     } finally {
       setIsLoading(false)
@@ -306,7 +312,7 @@ const OnboardingFlow = () => {
             initial={{ opacity: 0, y: -50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -50, scale: 0.9 }}
-            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full"
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[9999] max-w-md w-full"
           >
             <div className={`rounded-xl shadow-2xl border-l-4 p-4 ${
               toast.type === 'error' 

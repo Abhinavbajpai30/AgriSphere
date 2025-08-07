@@ -697,7 +697,21 @@ farmSchema.methods.updateSoilData = function(newSoilData) {
     lastTested: new Date()
   };
   
-  this.status.lastUpdated = new Date();
+  // Ensure status is an object before setting properties
+  if (typeof this.status === 'string') {
+    this.status = {
+      isActive: true,
+      lastUpdated: new Date(),
+      verificationStatus: 'unverified',
+      dataQuality: {
+        completeness: 75,
+        accuracy: 'medium',
+        lastValidated: new Date()
+      }
+    };
+  } else {
+    this.status.lastUpdated = new Date();
+  }
   return this.save();
 };
 
@@ -765,8 +779,22 @@ farmSchema.pre('save', function(next) {
   if (this.infrastructure && this.infrastructure.waterSources && this.infrastructure.waterSources.length > 0) completedFields++;
   if (this.fields && this.fields.length > 0) completedFields++;
   
-  this.status.dataQuality.completeness = Math.round((completedFields / totalFields) * 100);
-  this.status.lastUpdated = new Date();
+  // Ensure status is an object before setting properties
+  if (typeof this.status === 'string') {
+    this.status = {
+      isActive: true,
+      lastUpdated: new Date(),
+      verificationStatus: 'unverified',
+      dataQuality: {
+        completeness: Math.round((completedFields / totalFields) * 100),
+        accuracy: 'medium',
+        lastValidated: new Date()
+      }
+    };
+  } else {
+    this.status.dataQuality.completeness = Math.round((completedFields / totalFields) * 100);
+    this.status.lastUpdated = new Date();
+  }
   
   next();
 });

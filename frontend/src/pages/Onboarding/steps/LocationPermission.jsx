@@ -4,6 +4,7 @@ import { MapPinIcon, SignalIcon, CheckCircleIcon, ExclamationTriangleIcon, XMark
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useLanguage } from '../../../contexts/LanguageContext'
+import { onboardingApi } from '../../../services/api'
 
 // Fix for default markers in react-leaflet
 import L from 'leaflet'
@@ -364,8 +365,8 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
   // Geocoding functions using backend API
   const reverseGeocode = async (lat, lng) => {
     try {
-      const response = await fetch(`/api/onboarding/geocode?lat=${lat}&lng=${lng}`)
-      const data = await response.json()
+      const response = await onboardingApi.geocode({ lat, lng })
+      const data = response.data
       
       if (data.status === 'success' && data.data.address) {
         return data.data.address
@@ -383,20 +384,9 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
   const geocodeLocation = async (location) => {
     try {
       console.log('Geocoding location:', location)
-      const response = await fetch(`/api/onboarding/geocode?address=${encodeURIComponent(location)}`)
+      const response = await onboardingApi.geocode({ address: location })
       
-      if (!response.ok) {
-        console.error('Geocoding API error:', response.status, response.statusText)
-        if (response.status === 500) {
-          throw new Error('500 Internal Server Error - Geocoding service unavailable')
-        } else if (response.status === 404) {
-          throw new Error('Location not found')
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-      }
-      
-      const data = await response.json()
+      const data = response.data
       console.log('Geocoding response:', data)
       
       if (data.status === 'success' && data.data.coordinates) {
@@ -432,7 +422,7 @@ const LocationPermission = ({ onNext, onBack, onboardingData, updateData }) => {
             initial={{ opacity: 0, y: -50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -50, scale: 0.9 }}
-            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-full"
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[9999] max-w-md w-full"
           >
             <div className={`rounded-xl shadow-2xl border-l-4 p-4 ${
               toast.type === 'error' 

@@ -21,8 +21,10 @@ import {
 } from 'lucide-react';
 import apiService, { farmApi } from '../../services/api';
 import PlantGrowthAnimation from '../../components/Common/PlantGrowthAnimation';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CropPlanning = () => {
+  const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState('overview');
   const [selectedFarm, setSelectedFarm] = useState(null);
   const [recommendations, setRecommendations] = useState(null);
@@ -63,6 +65,8 @@ const CropPlanning = () => {
   // Fetch farms from API
   useEffect(() => {
     const fetchFarms = async () => {
+      if (!user) return; // Don't fetch if user is not authenticated
+      
       setFarmsLoading(true);
       try {
         const response = await farmApi.getFarms();
@@ -82,6 +86,11 @@ const CropPlanning = () => {
           }));
           console.log('Transformed farms:', transformedFarms);
           setFarms(transformedFarms);
+          
+          // Auto-select the first farm if available
+          if (transformedFarms.length > 0 && !selectedFarm) {
+            setSelectedFarm(transformedFarms[0]);
+          }
         } else {
           console.log('No farms found in API response');
           setFarms([]);
@@ -96,13 +105,21 @@ const CropPlanning = () => {
     };
 
     fetchFarms();
-  }, []);
+  }, [user]); // Add user as dependency to refresh when user changes
 
   useEffect(() => {
     if (selectedFarm) {
       fetchCropRecommendations();
     }
   }, [selectedFarm, userPreferences]);
+
+  // Reset selected farm when user changes
+  useEffect(() => {
+    setSelectedFarm(null);
+    setRecommendations(null);
+    setSelectedCrop(null);
+    setCropComparison(null);
+  }, [user]);
 
   const fetchCropRecommendations = async () => {
     if (!selectedFarm) return;

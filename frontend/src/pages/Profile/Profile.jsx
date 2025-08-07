@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { 
   UserCircleIcon,
@@ -11,11 +11,15 @@ import {
 } from '@heroicons/react/24/outline'
 import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { diagnosisApi, irrigationApi, farmApi } from '../../services/api'
 
 const Profile = () => {
   const { user, updateUser } = useAuth()
   const { t } = useLanguage()
   const [isEditing, setIsEditing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [stats, setStats] = useState([])
+  const [achievements, setAchievements] = useState([])
   const [formData, setFormData] = useState({
     firstName: user?.personalInfo?.firstName || '',
     lastName: user?.personalInfo?.lastName || '',
@@ -23,19 +27,125 @@ const Profile = () => {
     phoneNumber: user?.personalInfo?.phoneNumber || ''
   })
 
-  const achievements = [
-    { id: 1, title: 'First Diagnosis', description: 'Completed your first crop health check', icon: '🩺', earned: true },
-    { id: 2, title: 'Water Saver', description: 'Saved 500L of water this month', icon: '💧', earned: true },
-    { id: 3, title: 'Green Thumb', description: 'Successfully grew 5 different crops', icon: '🌱', earned: false },
-    { id: 4, title: 'Tech Farmer', description: 'Used all AgriSphere features', icon: '📱', earned: false }
-  ]
+  // Fetch real user statistics
+  useEffect(() => {
+    const fetchUserStats = async () => {
+      if (!user) return;
+      
+      setIsLoading(true);
+      try {
+        // Fetch all data in parallel
+        const [farmsResponse, diagnosesResponse, irrigationStatsResponse] = await Promise.allSettled([
+          farmApi.getFarms(),
+          diagnosisApi.getDiagnoses({ limit: 1 }), // Just get count
+          irrigationApi.getStats({ timeframe: 'month' })
+        ]);
 
-  const stats = [
-    { label: 'Total Farms', value: user?.farms?.length || 2, emoji: '🏡' },
-    { label: 'Diagnoses Made', value: 24, emoji: '🩺' },
-    { label: 'Water Saved (L)', value: 1250, emoji: '💧' },
-    { label: 'Days Active', value: 45, emoji: '📅' }
-  ]
+        console.log('API Responses:', {
+          farms: farmsResponse.status,
+          diagnoses: diagnosesResponse.status,
+          irrigation: irrigationStatsResponse.status
+        });
+
+        // Calculate days active
+        const registrationDate = new Date(user.appUsage?.registrationDate || user.createdAt);
+        const daysActive = Math.ceil((new Date() - registrationDate) / (1000 * 60 * 60 * 24));
+
+        // Build stats array with real data
+        const realStats = [
+          { 
+            label: 'Total Farms', 
+            value: farmsResponse.status === 'fulfilled' ? 
+              (farmsResponse.value.data?.data?.farms?.length || 0) : 0, 
+            emoji: '🏡' 
+          },
+          { 
+            label: 'Diagnoses Made', 
+            value: diagnosesResponse.status === 'fulfilled' ? 
+              (diagnosesResponse.value.data?.data?.pagination?.totalDiagnoses || 0) : 0, 
+            emoji: '🩺' 
+          },
+          { 
+            label: 'Water Saved (L)', 
+            value: irrigationStatsResponse.status === 'fulfilled' ? 
+              Math.round(irrigationStatsResponse.value.data?.totalWaterUsed || 0) : 0, 
+            emoji: '💧' 
+          },
+          { 
+            label: 'Days Active', 
+            value: daysActive, 
+            emoji: '📅' 
+          }
+        ];
+
+        console.log('Real Stats:', realStats);
+
+        setStats(realStats);
+
+        // Generate achievements based on real data
+        const realAchievements = [];
+        
+        // First Diagnosis achievement
+        if (diagnosesResponse.status === 'fulfilled' && 
+            diagnosesResponse.value.data?.data?.pagination?.totalDiagnoses > 0) {
+          realAchievements.push({
+            id: 1,
+            title: 'First Diagnosis',
+            description: 'Completed your first crop health check',
+            icon: '🩺',
+            earned: true
+          });
+        }
+
+        // Water Saver achievement
+        if (irrigationStatsResponse.status === 'fulfilled' && 
+            irrigationStatsResponse.value.data?.totalWaterUsed > 500) {
+          realAchievements.push({
+            id: 2,
+            title: 'Water Saver',
+            description: 'Saved significant water through smart irrigation',
+            icon: '💧',
+            earned: true
+          });
+        }
+
+        // Farm Manager achievement
+        if (farmsResponse.status === 'fulfilled' && 
+            farmsResponse.value.data?.data?.farms?.length > 0) {
+          realAchievements.push({
+            id: 3,
+            title: 'Farm Manager',
+            description: 'Successfully set up your first farm',
+            icon: '🌱',
+            earned: true
+          });
+        }
+
+        // Long-term User achievement
+        if (daysActive > 30) {
+          realAchievements.push({
+            id: 4,
+            title: 'Dedicated Farmer',
+            description: 'Been using AgriSphere for over a month',
+            icon: '📱',
+            earned: true
+          });
+        }
+
+        setAchievements(realAchievements);
+
+      } catch (error) {
+        console.error('Error fetching user stats:', error);
+        // Fallback to empty stats if API fails
+        setStats([]);
+        setAchievements([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUserStats();
+  }, [user]);
 
   const handleSave = async () => {
     try {
@@ -243,29 +353,51 @@ const Profile = () => {
                 <TrophyIcon className="w-5 h-5 text-yellow-500" />
                 <span>Achievements</span>
               </h2>
-              <div className="grid md:grid-cols-2 gap-4">
-                {achievements.map((achievement) => (
-                  <div 
-                    key={achievement.id} 
-                    className={`p-4 rounded-2xl border-2 transition-all ${
-                      achievement.earned 
-                        ? 'border-green-200 bg-green-50' 
-                        : 'border-gray-200 bg-gray-50 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className="text-2xl">{achievement.icon}</div>
-                      <div>
-                        <h4 className="font-semibold text-gray-800 text-sm">{achievement.title}</h4>
-                        <p className="text-xs text-gray-600">{achievement.description}</p>
-                        {achievement.earned && (
-                          <span className="text-xs text-green-600 font-semibold">✓ Earned</span>
-                        )}
+              {isLoading ? (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="p-4 rounded-2xl border-2 border-gray-200 bg-gray-50 animate-pulse">
+                      <div className="flex items-center space-x-3">
+                        <div className="text-2xl bg-gray-300 rounded w-8 h-8"></div>
+                        <div className="flex-1">
+                          <div className="h-4 bg-gray-300 rounded mb-2"></div>
+                          <div className="h-3 bg-gray-300 rounded mb-1"></div>
+                          <div className="h-3 bg-gray-300 rounded w-16"></div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : achievements.length > 0 ? (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {achievements.map((achievement) => (
+                    <div 
+                      key={achievement.id} 
+                      className={`p-4 rounded-2xl border-2 transition-all ${
+                        achievement.earned 
+                          ? 'border-green-200 bg-green-50' 
+                          : 'border-gray-200 bg-gray-50 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="text-2xl">{achievement.icon}</div>
+                        <div>
+                          <h4 className="font-semibold text-gray-800 text-sm">{achievement.title}</h4>
+                          <p className="text-xs text-gray-600">{achievement.description}</p>
+                          {achievement.earned && (
+                            <span className="text-xs text-green-600 font-semibold">✓ Earned</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-4xl mb-4">🏆</div>
+                  <p className="text-gray-600">No achievements yet. Start farming to earn achievements!</p>
+                </div>
+              )}
             </motion.div>
           </div>
 
@@ -274,15 +406,27 @@ const Profile = () => {
             {/* Stats */}
             <motion.div variants={itemVariants}>
               <h2 className="text-lg font-semibold text-gray-800 mb-4">Your Stats</h2>
-              <div className="space-y-3">
-                {stats.map((stat, index) => (
-                  <div key={stat.label} className="card text-center">
-                    <div className="text-2xl mb-2">{stat.emoji}</div>
-                    <div className="text-2xl font-bold text-primary-600 mb-1">{stat.value}</div>
-                    <div className="text-sm text-gray-600">{stat.label}</div>
-                  </div>
-                ))}
-              </div>
+              {isLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="card text-center animate-pulse">
+                      <div className="text-2xl mb-2 bg-gray-300 rounded w-8 h-8 mx-auto"></div>
+                      <div className="text-2xl font-bold text-primary-600 mb-1 bg-gray-300 rounded h-8 w-16 mx-auto"></div>
+                      <div className="text-sm text-gray-600 bg-gray-300 rounded h-4 w-20 mx-auto"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {stats.map((stat, index) => (
+                    <div key={stat.label} className="card text-center">
+                      <div className="text-2xl mb-2">{stat.emoji}</div>
+                      <div className="text-2xl font-bold text-primary-600 mb-1">{stat.value}</div>
+                      <div className="text-sm text-gray-600">{stat.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
 
             {/* Progress */}

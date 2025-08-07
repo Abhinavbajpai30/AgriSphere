@@ -33,6 +33,9 @@ class ApiService {
         const token = localStorage.getItem('agrisphere_token')
         if (token) {
           config.headers.Authorization = `Bearer ${token}`
+          console.log('Adding auth token to request:', config.url)
+        } else {
+          console.log('No auth token found for request:', config.url)
         }
         
         // Add request timestamp for tracking
@@ -51,6 +54,8 @@ class ApiService {
         // Log response time
         const responseTime = Date.now() - response.config.metadata.startTime
         console.log(`API Response: ${response.config.method?.toUpperCase()} ${response.config.url} - ${responseTime}ms`)
+        console.log('Response status:', response.status)
+        console.log('Response data:', response.data)
         
         return response
       },
@@ -478,6 +483,7 @@ export const irrigationApi = {
   getLogs: (params = {}) => apiService.get('/irrigation', { params }),
   getSchedule: (farmId, days) => apiService.get(`/irrigation/schedule/${farmId}`, { params: { days } }),
   getAnalytics: (farmId, timeRange) => apiService.get(`/irrigation/analytics/${farmId}`, { params: { timeRange } }),
+  getStats: (params = {}) => apiService.get('/irrigation/stats', { params }),
 }
 
 export const planningApi = {
@@ -495,6 +501,21 @@ export const dashboardApi = {
   completeTask: (taskId) => apiService.post(`/dashboard/task/${taskId}/complete`),
   getProgress: () => apiService.get('/dashboard/progress'),
   getInsights: () => apiService.get('/dashboard/insights'),
+}
+
+export const onboardingApi = {
+  update: (data) => apiService.put('/onboarding/update', data),
+  complete: (data) => apiService.post('/onboarding/complete', data),
+  geocode: (params) => apiService.get('/onboarding/geocode', { params }),
+}
+
+export const healthApi = {
+  check: () => apiService.get('/health'),
+  ping: () => apiService.get('/ping'),
+}
+
+export const errorApi = {
+  report: (errorData) => apiService.post('/errors/report', errorData),
 }
 
 export default apiService

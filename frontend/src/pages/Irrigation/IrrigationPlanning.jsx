@@ -21,8 +21,10 @@ import {
 } from 'lucide-react';
 import apiService, { farmApi } from '../../services/api';
 import WaterDropAnimation from '../../components/Common/WaterDropAnimation';
+import { useAuth } from '../../contexts/AuthContext';
 
 const IrrigationPlanning = () => {
+  const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState('overview');
   const [selectedFarm, setSelectedFarm] = useState(null);
   const [recommendation, setRecommendation] = useState(null);
@@ -36,6 +38,8 @@ const IrrigationPlanning = () => {
   // Fetch farms from API
   useEffect(() => {
     const fetchFarms = async () => {
+      if (!user) return; // Don't fetch if user is not authenticated
+      
       setFarmsLoading(true);
       try {
         const response = await farmApi.getFarms();
@@ -56,6 +60,11 @@ const IrrigationPlanning = () => {
             lastIrrigation: '2 days ago' // This would come from irrigation logs
           }));
           setFarms(transformedFarms);
+          
+          // Auto-select the first farm if available
+          if (transformedFarms.length > 0 && !selectedFarm) {
+            setSelectedFarm(transformedFarms[0]);
+          }
         }
       } catch (error) {
         console.error('Error fetching farms:', error);
@@ -67,13 +76,21 @@ const IrrigationPlanning = () => {
     };
 
     fetchFarms();
-  }, []);
+  }, [user]); // Add user as dependency to refresh when user changes
 
   useEffect(() => {
     if (selectedFarm) {
       fetchIrrigationData();
     }
   }, [selectedFarm]);
+
+  // Reset selected farm when user changes
+  useEffect(() => {
+    setSelectedFarm(null);
+    setRecommendation(null);
+    setWeatherForecast(null);
+    setIrrigationHistory([]);
+  }, [user]);
 
   const fetchIrrigationData = async () => {
     if (!selectedFarm) return;

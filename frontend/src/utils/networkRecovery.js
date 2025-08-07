@@ -3,6 +3,8 @@
  * Handles network failures and retry strategies
  */
 
+import { healthApi } from '../services/api'
+
 class NetworkRecovery {
   constructor() {
     this.isOnline = navigator.onLine
@@ -140,11 +142,8 @@ class NetworkRecovery {
    */
   async checkConnectivity() {
     try {
-      const response = await fetch('/api/health', {
-        method: 'HEAD',
-        cache: 'no-cache'
-      })
-      return response.ok
+      const response = await healthApi.check()
+      return response.status === 200
     } catch (error) {
       return false
     }
@@ -155,23 +154,18 @@ class NetworkRecovery {
    */
   async comprehensiveConnectivityCheck() {
     const endpoints = [
-      '/api/health',
-      '/api/ping',
-      '/', // Main page
+      healthApi.check,
+      healthApi.ping,
+      () => fetch('/', { method: 'HEAD', cache: 'no-cache', timeout: 5000 })
     ]
 
     const results = await Promise.allSettled(
-      endpoints.map(endpoint => 
-        fetch(endpoint, { 
-          method: 'HEAD', 
-          cache: 'no-cache',
-          timeout: 5000 
-        })
-      )
+      endpoints.map(endpointFn => endpointFn())
     )
 
     const successCount = results.filter(
-      result => result.status === 'fulfilled' && result.value.ok
+      result => result.status === 'fulfilled' && 
+      (result.value.status === 200 || result.value.ok)
     ).length
 
     const connectivityScore = successCount / endpoints.length
@@ -181,8 +175,9 @@ class NetworkRecovery {
       isConnected,
       connectivityScore,
       details: results.map((result, index) => ({
-        endpoint: endpoints[index],
-        success: result.status === 'fulfilled' && result.value.ok,
+        endpoint: index === 0 ? '/api/health' : index === 1 ? '/api/ping' : '/',
+        success: result.status === 'fulfilled' && 
+        (result.value.status === 200 || result.value.ok),
         error: result.status === 'rejected' ? result.reason.message : null
       }))
     }
@@ -332,9 +327,7 @@ class NetworkRecovery {
     const startTime = Date.now()
     
     try {
-      const response = await fetch('/api/ping', {
-        cache: 'no-cache'
-      })
+      const response = await healthApi.ping()
       
       const latency = Date.now() - startTime
       

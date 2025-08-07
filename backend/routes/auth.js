@@ -37,7 +37,6 @@ const validateRegistration = [
   body('personalInfo.email')
     .optional()
     .isEmail()
-    .normalizeEmail()
     .withMessage('Please enter a valid email address'),
   
   body('authentication.password')

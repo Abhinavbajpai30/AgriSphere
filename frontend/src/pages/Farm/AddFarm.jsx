@@ -13,7 +13,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useLanguage } from '../../contexts/LanguageContext'
 import FarmPlotting from '../Onboarding/steps/FarmPlotting'
 import CropSelection from '../Onboarding/steps/CropSelection'
-import apiService, { farmApi } from '../../services/api'
+import apiService, { farmApi, onboardingApi } from '../../services/api'
 
 const AddFarm = () => {
   const navigate = useNavigate()
@@ -84,17 +84,12 @@ const AddFarm = () => {
           try {
             console.log('Trying geocoding with:', address)
             
-            // Use GET request with query parameters instead of POST
-            const response = await fetch(`/api/onboarding/geocode?address=${encodeURIComponent(address)}`, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-              }
-            })
+            // Use centralized API service
+            const response = await onboardingApi.geocode({ address })
             
-            const data = await response.json()
+            const data = response.data
             
-            if (response.ok && data.status === 'success' && data.data.coordinates) {
+            if (data.status === 'success' && data.data.coordinates) {
               coordinates = data.data.coordinates
               geocodingSuccess = true
               console.log('Geocoding successful with address:', address)
@@ -553,7 +548,7 @@ const AddFarm = () => {
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 50 }}
-              className={`fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-lg shadow-lg ${
+              className={`fixed bottom-20 left-1/2 transform -translate-x-1/2 z-[9999] px-6 py-3 rounded-lg shadow-lg ${
                 toast.type === 'success' 
                   ? 'bg-green-500 text-white' 
                   : 'bg-red-500 text-white'

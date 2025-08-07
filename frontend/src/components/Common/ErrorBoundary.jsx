@@ -6,6 +6,7 @@ import {
   ChatBubbleBottomCenterTextIcon,
   HomeIcon
 } from '@heroicons/react/24/outline'
+import { errorApi } from '../../services/api'
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -60,13 +61,7 @@ class ErrorBoundary extends Component {
 
     // Send to backend in production
     if (import.meta.env.PROD) {
-      fetch('/api/errors/report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(errorData)
-      }).catch(reportError => {
+      errorApi.report(errorData).catch(reportError => {
         console.error('Failed to report error:', reportError)
       })
     }

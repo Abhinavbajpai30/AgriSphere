@@ -103,7 +103,6 @@ const validationSchemas = {
     body('personalInfo.email')
       .optional()
       .isEmail()
-      .normalizeEmail()
       .withMessage('Invalid email format'),
     
     body('personalInfo.dateOfBirth')
@@ -258,7 +257,6 @@ const validationSchemas = {
     body('personalInfo.email')
       .optional()
       .isEmail()
-      .normalizeEmail()
       .withMessage('Invalid email format'),
     
     body('preferences.language')

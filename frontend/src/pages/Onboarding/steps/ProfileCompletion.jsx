@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
-import { UserIcon, EyeIcon, EyeSlashIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
+import { motion, AnimatePresence } from 'framer-motion'
+import { UserIcon, EyeIcon, EyeSlashIcon, CheckCircleIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useLanguage } from '../../../contexts/LanguageContext'
 import { useAuth } from '../../../contexts/AuthContext'
 
@@ -27,6 +27,16 @@ const ProfileCompletion = ({ onComplete, onBack, onboardingData, updateData, isL
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [errors, setErrors] = useState({})
+  const [toast, setToast] = useState({ show: false, message: '', type: 'error' })
+
+  const showToast = (message, type = 'error') => {
+    setToast({ show: true, message, type })
+    setTimeout(() => setToast({ show: false, message: '', type: 'error' }), 5000)
+  }
+
+  const hideToast = () => {
+    setToast({ show: false, message: '', type: 'error' })
+  }
 
   const experienceLevels = [
     { value: 'beginner', label: 'New to Farming', emoji: '🌱', description: '0-2 years experience' },
@@ -124,6 +134,41 @@ const ProfileCompletion = ({ onComplete, onBack, onboardingData, updateData, isL
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[9999] max-w-md w-full"
+          >
+            <div className={`rounded-xl shadow-2xl border-l-4 p-4 ${
+              toast.type === 'error' 
+                ? 'bg-red-50 border-red-400 text-red-800' 
+                : 'bg-green-50 border-green-400 text-green-800'
+            }`}>
+              <div className="flex items-start space-x-3">
+                {toast.type === 'error' ? (
+                  <ExclamationTriangleIcon className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                ) : (
+                  <CheckCircleIcon className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+                )}
+                <div className="flex-1">
+                  <p className="font-medium">{toast.message}</p>
+                </div>
+                <button
+                  onClick={hideToast}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XMarkIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       <div className="max-w-2xl w-full">
         {/* Header */}
         <motion.div
@@ -185,7 +230,7 @@ const ProfileCompletion = ({ onComplete, onBack, onboardingData, updateData, isL
                       onComplete(completeData)
                     } else {
                       // User needs to fill out the form first
-                      alert('Please fill out your personal information before proceeding to the dashboard.')
+                      showToast('Please fill out your personal information before proceeding to the dashboard.', 'error')
                     }
                   }}
                   disabled={isLoading}

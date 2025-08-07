@@ -10,10 +10,12 @@ import {
   XMarkIcon
 } from '@heroicons/react/24/outline'
 import { farmApi } from '../../services/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 const FarmManagement = () => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
   const [selectedTab, setSelectedTab] = useState('overview')
   const [successMessage, setSuccessMessage] = useState('')
   const [farms, setFarms] = useState([])
@@ -35,6 +37,8 @@ const FarmManagement = () => {
 
   // Fetch user's farms
   const fetchFarms = async () => {
+    if (!user) return; // Don't fetch if user is not authenticated
+    
     try {
       setFarmsLoading(true)
       setFarmsError('')
@@ -59,7 +63,7 @@ const FarmManagement = () => {
   // Initial fetch and refresh when returning from add farm
   useEffect(() => {
     fetchFarms()
-  }, [])
+  }, [user]) // Add user as dependency to refresh when user changes
 
   // Refresh farms when returning from add farm page
   useEffect(() => {

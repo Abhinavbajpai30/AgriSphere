@@ -590,7 +590,16 @@ router.put('/update', authenticateUser, asyncHandler(async (req, res) => {
         },
         growthStage: 'planting'
       })),
-      status: 'active'
+      status: {
+        isActive: true,
+        lastUpdated: new Date(),
+        verificationStatus: 'unverified',
+        dataQuality: {
+          completeness: 75,
+          accuracy: 'medium',
+          lastValidated: new Date()
+        }
+      }
     };
 
     // Step 4: Update user and create farm immediately (fast path)
