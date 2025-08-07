@@ -61,17 +61,35 @@ const CropDiagnosis = () => {
       // Also add class to any floating navigation elements
       const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
       floatingNavs.forEach(nav => nav.classList.add('camera-hidden'))
+      
+      // Prevent scrolling and set viewport for mobile
+      document.body.style.overflow = 'hidden'
+      document.body.style.position = 'fixed'
+      document.body.style.width = '100%'
+      document.body.style.height = '100%'
     } else {
       document.body.classList.remove('camera-active')
       // Remove class from floating navigation elements
       const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
       floatingNavs.forEach(nav => nav.classList.remove('camera-hidden'))
+      
+      // Restore scrolling
+      document.body.style.overflow = ''
+      document.body.style.position = ''
+      document.body.style.width = ''
+      document.body.style.height = ''
     }
 
     return () => {
       document.body.classList.remove('camera-active')
       const floatingNavs = document.querySelectorAll('[class*="fixed bottom-6"]')
       floatingNavs.forEach(nav => nav.classList.remove('camera-hidden'))
+      
+      // Restore scrolling
+      document.body.style.overflow = ''
+      document.body.style.position = ''
+      document.body.style.width = ''
+      document.body.style.height = ''
     }
   }, [currentStep])
 
@@ -400,19 +418,19 @@ const CropDiagnosis = () => {
 
   // Render Camera Interface
   const renderCameraInterface = () => (
-    <div className="min-h-screen bg-black relative">
+    <div className="min-h-screen bg-black relative safe-top safe-bottom">
       {/* Back Button - Floating */}
       <motion.button
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={resetDiagnosis}
-        className="absolute top-6 left-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20"
+        className="absolute top-6 left-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20 safe-top"
       >
         <ArrowLeftIcon className="w-6 h-6 text-white" />
       </motion.button>
 
       {/* Image Counter - Floating */}
-      <div className="absolute top-6 right-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20">
+      <div className="absolute top-6 right-6 z-20 w-12 h-12 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20 safe-top">
         <span className="text-white text-sm font-semibold">{capturedImages.length}</span>
       </div>
 
@@ -454,23 +472,23 @@ const CropDiagnosis = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="absolute bottom-32 left-0 right-0 text-center px-6 z-10"
+          className="absolute bottom-40 left-0 right-0 text-center px-6 z-10 safe-bottom"
         >
           <p className="text-white text-lg font-medium mb-2">🌱 Perfect!</p>
           <p className="text-white/80">Center the plant and ensure good lighting</p>
         </motion.div>
 
-        {/* Bottom Controls */}
-        <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
-          <div className="flex items-center relative">
+        {/* Bottom Controls - Fixed positioning for mobile */}
+        <div className="camera-controls fixed bottom-0 left-0 right-0 p-4 pb-8 bg-gradient-to-t from-black/95 via-black/80 to-transparent safe-bottom">
+          <div className="flex items-center justify-between relative max-w-md mx-auto">
             {/* Gallery Preview - Left */}
-            <div className="flex space-x-3 absolute left-0">
-              {capturedImages.slice(-3).map((img, index) => (
+            <div className="flex space-x-2">
+              {capturedImages.slice(-2).map((img, index) => (
                 <motion.div
                   key={img.id}
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="w-14 h-14 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg"
+                  className="w-12 h-12 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg"
                 >
                   <img src={img.preview} alt="" className="w-full h-full object-cover" />
                 </motion.div>
@@ -483,10 +501,10 @@ const CropDiagnosis = () => {
               whileTap={{ scale: 0.9 }}
               onClick={capturePhoto}
               disabled={!isCameraReady}
-              className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-2xl disabled:opacity-50 absolute left-1/2 transform -translate-x-1/2"
+              className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl disabled:opacity-50"
             >
-              <div className="w-20 h-20 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full flex items-center justify-center">
-                <CameraIcon className="w-10 h-10 text-white" />
+              <div className="w-16 h-16 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full flex items-center justify-center">
+                <CameraIcon className="w-8 h-8 text-white" />
               </div>
             </motion.button>
 
@@ -496,7 +514,7 @@ const CropDiagnosis = () => {
               whileTap={{ scale: 0.95 }}
               onClick={uploadImages}
               disabled={capturedImages.length === 0}
-              className="px-8 py-4 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full text-white font-semibold shadow-lg disabled:opacity-50 text-lg absolute right-0"
+              className="px-6 py-3 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full text-white font-semibold shadow-lg disabled:opacity-50 text-sm"
             >
               Analyze ({capturedImages.length})
             </motion.button>

@@ -66,6 +66,10 @@ AgriSphere is designed to create a measurable impact and directly aligns with th
 * **Offline Capability**: PWA with offline sync for rural connectivity.
 * **Analytics Dashboard**: A personal "daily command center" providing at-a-glance wisdom and the single most important task for the day.
 
+### Live Demo
+
+* Web App: https://agrisphere.abhinavbajpai.com
+
 ## 🛠️ Technology Stack
 
 #### Backend
